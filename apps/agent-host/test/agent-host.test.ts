@@ -56,26 +56,51 @@ async function holy(dir: string, extra?: string) {
   await writeFile(file, data)
   return { file, digest: createHash("sha512").update(data).digest("hex") }
 }
+async function demoModules(home: string) {
+  const modules = join(home, "payload/node_modules")
+  await mkdir(join(modules, "expo-device-hub/dist/server"), { recursive: true })
+  await writeFile(join(modules, "expo-device-hub/dist/server/cli.mjs"), "")
+  await writeFile(join(home, "payload/expo-device-hub-version"), "0.22.1\n")
+  await mkdir(join(modules, "agent-device/bin"), { recursive: true })
+  await writeFile(join(modules, "agent-device/bin/agent-device.mjs"), "")
+  await writeFile(join(home, "payload/agent-device-version"), "0.21.36\n")
+  return modules
+}
 const unprivileged = test.skipIf(!process.geteuid?.())
 unprivileged(
   "pinned local registration is idempotent and preserves independent settings",
   async () =>
     await fixture(async (home) => {
       const { file, digest } = await holy(home)
-      const modules = "/opt/t1os/demo-modules"
+      const modules = await demoModules(home)
       await expect(stage(file, home)).rejects.toThrow("SHA-512")
       const pi = join(home, ".pi/agent/settings.json")
       await expect(lstat(pi)).rejects.toThrow("ENOENT")
       await stage(file, home, modules, digest)
       const t3 = join(home, ".t3/userdata/settings.json")
       expect(JSON.parse(await readFile(t3, "utf8"))).toEqual({
+        enableDeviceSupport: true,
+        enableAgentDeviceAccess: false,
+        deviceOnboardingCompleted: true,
         providerInstances: { pi: { driver: "pi", enabled: true } },
       })
       expect((await lstat(pi)).mode & 0o777).toBe(0o600)
       expect(await readlink(join(home, ".pi/agent/node_modules"))).toBe(modules)
+      expect(
+        await readFile(join(home, ".t3/tools/expo-device-hub/0.22.1/.install-complete"), "utf8"),
+      ).toBe("0.22.1\n")
+      expect(
+        await readFile(join(home, ".t3/tools/agent-device/0.21.36/.install-complete"), "utf8"),
+      ).toBe("0.21.36\n")
+      await expect(lstat(join(home, ".t3/userdata/device/agent-device"))).rejects.toThrow("ENOENT")
+      const operator = JSON.parse(await readFile(t3, "utf8"))
+      operator.enableDeviceSupport = false
+      operator.enableAgentDeviceAccess = true
+      await writeFile(t3, JSON.stringify(operator))
       const before = (await lstat(t3)).ino
       await stage(file, home, modules, digest)
       expect((await lstat(t3)).ino).toBe(before)
+      expect(JSON.parse(await readFile(t3, "utf8"))).toEqual(operator)
       await writeFile(t3, '{"operatorSetting": true}')
       await expect(stage(file, home, modules, digest)).rejects.toThrow("left intact")
       expect(await readFile(t3, "utf8")).toBe('{"operatorSetting": true}')
@@ -89,7 +114,7 @@ unprivileged(
       const bad = await holy(home, "package/../evil")
       await expect(stage(bad.file, home, undefined, bad.digest)).rejects.toThrow("archive member")
       const good = await holy(home)
-      await stage(good.file, home, undefined, good.digest)
+      await stage(good.file, home, await demoModules(home), good.digest)
       await writeFile(
         join(home, ".local/share/t1os/agent/holyagent-0.3.3/scripts/holyagent"),
         "modified",
@@ -105,6 +130,23 @@ unprivileged(
       await expect(lstat(join(home, "agent/settings.json"))).rejects.toThrow("ENOENT")
     })
   },
+)
+
+unprivileged(
+  "first boot verifies candidate before the stable release link exists",
+  async () =>
+    await fixture(async (home) => {
+      const { file, digest } = await holy(home)
+      const candidate = await demoModules(home)
+      const stable = join(home, "current/pi-deps/node_modules")
+      await stage(file, home, stable, digest, candidate)
+      const cache = join(home, ".t3/tools/expo-device-hub/0.22.1")
+      expect(await readlink(join(cache, "node_modules"))).toBe(stable)
+      expect(await readlink(join(cache, ".install-complete"))).toBe(
+        join(home, "current/pi-deps/expo-device-hub-version"),
+      )
+      await expect(lstat(stable)).rejects.toThrow("ENOENT")
+    }),
 )
 
 test("managed links never replace independent installs", async () =>

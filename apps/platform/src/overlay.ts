@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   openSync,
   readSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -145,6 +146,39 @@ export function unpack(fd: number, destination: string): void {
         !androidProfileFiles.every((path) => names.has(path))
       )
         throw new Error("incomplete Android profile")
+      if (names.has("runtime/profile.json")) {
+        const marker = readFileSync(join(destination, "runtime/profile.json"), "utf8")
+        if (!names.get("bin/t1os")) throw Error("profile requires compiled t1os CLI")
+        if (marker === '{"profile":"minimal"}\n') {
+          if (
+            [...names.keys()].some(
+              (name) =>
+                !required.has(name) && name !== "bin/t1os" && name !== "runtime/profile.json",
+            )
+          )
+            throw Error("unexpected capability in minimal profile")
+        } else if (marker === '{"profile":"full"}\n') {
+          const fullRequired = [
+            ...androidProfileFiles,
+            "runtime/remote/t1os-ssh-tunnel.socket",
+            "runtime/desktop/t1os-desktop.service",
+            "runtime/run-job",
+            "agent-host/pi-deps/expo-device-hub-version",
+            "agent-host/pi-deps/agent-device-version",
+            "agent-host/pi-deps/node_modules/agent-device/bin/agent-device.mjs",
+            "agent-host/pi-deps/browser-smoke.ts",
+            "agent-host/pi-deps/node_modules/playwright-core/package.json",
+            "runtime/agent/t1os-t3.service",
+            "runtime/agent/holyagent-0.3.3.tgz",
+            "agent-host/bin/node",
+            "agent-host/bin/bun",
+            "agent-host/t3-release/t3",
+            "agent-host/pi-deps/node_modules/expo-device-hub/dist/server/cli.mjs",
+          ]
+          for (const path of fullRequired)
+            if (!names.has(path)) throw Error("incomplete full profile: " + path)
+        } else throw Error("invalid bundle profile")
+      }
       for (const [name, executable] of required) {
         if (!names.has(name) || (executable && !names.get(name)))
           throw new Error(`missing or nonexecutable overlay member: ${name}`)
@@ -169,6 +203,7 @@ export function unpack(fd: number, destination: string): void {
       longPath = undefined
       if ((type !== 0 && type !== 48) || !allowed(name) || names.has(name))
         throw new Error(`unexpected bundle entry: ${JSON.stringify(name)}`)
+      if (name === "runtime/profile.json" && length > 32) throw Error("invalid bundle profile size")
       total += length
       if (total > MAX_BYTES || names.size >= MAX_ENTRIES)
         throw new Error("overlay bundle exceeds size limit")

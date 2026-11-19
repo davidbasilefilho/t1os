@@ -87,11 +87,21 @@ function firstBoot(args: string[]): void {
       throw new Error("invalid active release")
     trusted(release, true)
     if ((lstatSync(release).mode & 0o777) !== 0o755) throw new Error("invalid release ownership")
+    const marker = JSON.parse(readFileSync(join(release, "runtime/profile.json"), "utf8")) as {
+      profile?: string
+    }
+    if (marker.profile !== "full" && marker.profile !== "minimal")
+      throw Error("invalid bundle profile")
+    const full = marker.profile === "full"
+    if (!full && existsSync(join(BASE, "current/agent-host")))
+      throw Error(
+        "Minimal requires a fresh guest; existing full capabilities will not be silently deactivated.",
+      )
     setupOperator()
     ensureDirectory(STATE, 0o700)
     const platform = join(release, "bin/t1os-guest-platform")
     trusted(platform)
-    run([platform, "install-runtime", "/"], 120_000, false)
+    if (full) run([platform, "install-runtime", "/"], 120_000, false)
     run(["systemctl", "daemon-reload"])
     for (const unit of ["sshd.service", "sshd.socket"]) {
       if (run(["systemctl", "show", unit, "--property=LoadState", "--value"]) === "loaded") {
@@ -107,7 +117,7 @@ function firstBoot(args: string[]): void {
     updateCli(release)
     const archive = join(release, "runtime/agent/holyagent-0.3.3.tgz")
     const toolDirectory = join(release, "agent-host")
-    if (existsSync(archive) || existsSync(toolDirectory)) {
+    if (full) {
       trusted(archive)
       trusted(toolDirectory, true)
       for (const [command, argument] of [

@@ -83,3 +83,34 @@ test("Android profile help is discoverable without a guest or state changes", ()
   })
   expect(existsSync(state)).toBe(false)
 })
+
+test("capabilities emits a versioned read-only inventory on a machine without the guest", () => {
+  const check = invoke("capabilities", "--json")
+  expect(check.status).toBe(0)
+  expect(JSON.parse(check.output).version).toBe(1)
+  expect(JSON.parse(check.output).capabilities.map((c: { name: string }) => c.name)).toContain(
+    "Recovery",
+  )
+  expect(invoke("capabilities", "--enable").status).toBe(1)
+  expect(invoke("android", "--help").output).toContain("start")
+  expect(existsSync(state)).toBe(false)
+})
+
+test("browser fixture help and invalid requests do not launch anything", () => {
+  expect(invoke("--help").output).toContain("browser --help")
+  expect(invoke("browser", "--help").output).toContain(
+    "browser check <workspace-id> --chromium <absolute-path>",
+  )
+  for (const args of [
+    ["../outside", "--chromium", "/bin/false"],
+    ["demo", "--chromium", "relative"],
+    ["demo", "--url", "https://example.invalid"],
+    ["demo", "--chromium", "/bin/false", "extra"],
+  ]) {
+    expect(invoke("browser", "check", ...args)).toMatchObject({
+      status: 1,
+      error: expect.stringContaining("browser check <workspace-id>"),
+    })
+  }
+  expect(existsSync(state)).toBe(false)
+})

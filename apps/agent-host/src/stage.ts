@@ -17,7 +17,18 @@ import {
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative } from "node:path"
 
+import { hubSettings } from "../../device-hub/src/lock"
 import { extractFile, readTar, verifiedArchive } from "./archive"
+
+/** Device Hub release expected by the pinned T3 version. */
+export const HUB_VERSION = "0.22.1"
+/** Immutable entry relative to the frozen Device Hub module tree. */
+export const HUB_ENTRY = "expo-device-hub/dist/server/cli.mjs"
+/** Reviewed upstream tool cache entries; installing these does not grant agent access. */
+export const DEVICE_TOOLS = [
+  { name: "expo-device-hub", version: HUB_VERSION, entry: HUB_ENTRY },
+  { name: "agent-device", version: "0.21.36", entry: "agent-device/bin/agent-device.mjs" },
+] as const
 
 /** Verified upstream HolyAgent publication. */
 export const VERSION = "0.3.3"
@@ -208,6 +219,7 @@ export async function stage(
   home = process.env.HOME ?? homedir(),
   modules = "/opt/t1os/current/agent-host/pi-deps/node_modules",
   digest = DIGEST,
+  verificationModules = modules,
 ) {
   const uid = process.geteuid?.()
   if (!uid) throw new Error("refusing to configure root")
@@ -237,6 +249,31 @@ export async function stage(
       const dest = join(store, `holyagent-${VERSION}`)
       await unpack(artifact, dest, digest, uid)
       for (const dir of [store, pi]) await keepLink(join(dir, "node_modules"), modules)
+      for (const tool of DEVICE_TOOLS) {
+        const marker = join(dirname(modules), tool.name + "-version")
+        if (
+          (
+            await readFile(join(dirname(verificationModules), tool.name + "-version"), "utf8")
+          ).trim() !== tool.version ||
+          !(await lstat(join(verificationModules, tool.entry))).isFile()
+        )
+          throw new Error("missing or mismatched pinned device tool: " + tool.name)
+        const hubDir = join(home, ".t3/tools", tool.name, tool.version)
+        await privateDir(hubDir, home, uid)
+        // Never adopt or overwrite an operator's independent npm installation.
+        for (const [name, target] of [
+          ["node_modules", modules],
+          [".install-complete", marker],
+        ] as const) {
+          const info = await metadata(join(hubDir, name))
+          if (info && (!info.isSymbolicLink() || (await readlink(join(hubDir, name))) !== target))
+            throw new Error(
+              "existing device tool cache left intact; review it manually: " + tool.name,
+            )
+        }
+        await keepLink(join(hubDir, "node_modules"), modules)
+        await keepLink(join(hubDir, ".install-complete"), marker)
+      }
       const locations = [
         ["holyagent", VERSION, dest],
         ...Object.entries(FEATURES).map(([pkg, version]) => [pkg, version, join(modules, pkg)]),
@@ -279,7 +316,7 @@ export async function stage(
       }
       await seed(
         join(t3, "settings.json"),
-        { providerInstances: { pi: { driver: "pi", enabled: true } } },
+        hubSettings({ providerInstances: { pi: { driver: "pi", enabled: true } } }),
         (conf) => {
           if (!record(conf.providerInstances) || !record(conf.providerInstances.pi)) return false
           const provider = conf.providerInstances.pi

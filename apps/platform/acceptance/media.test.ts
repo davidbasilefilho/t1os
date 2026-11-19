@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, lstatSync, readdirSync, symlinkSync } from "node:fs"
+import { mkdtempSync, rmSync, lstatSync, readdirSync, readFileSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -31,6 +31,9 @@ describe.skipIf(bundle === undefined && pin === undefined)(
     }, 120000)
     test("full-profile stage and reapply preserve compiled bootstrap, CLI and actual tools", () => {
       const release = stage(bundle!, pin!, dir)
+      expect(readFileSync(join(release, "runtime/profile.json"), "utf8")).toBe(
+        '{"profile":"full"}\n',
+      )
       for (const path of [
         "bin/t1os-guest-platform",
         "bin/t1os",
@@ -56,9 +59,50 @@ describe.skipIf(bundle === undefined && pin === undefined)(
       const help = Bun.spawnSync([join(release, "bin/t1os"), "android", "--help"])
       expect(help.exitCode).toBe(0)
       expect(help.stdout.toString()).toContain("install-sdk")
+      const publicHelp = Bun.spawnSync([join(release, "bin/t1os"), "--help"])
+      expect(publicHelp.stdout.toString()).toContain("browser")
+      if (process.getuid?.()) {
+        // The installed dependency tree must load, then reject a mismatched version before a browser session starts.
+        const fixture = Bun.spawnSync(
+          [
+            join(release, "agent-host/bin/bun"),
+            "--no-env-file",
+            join(release, "agent-host/pi-deps/browser-smoke.ts"),
+            "media-test",
+            "--chromium",
+            "/usr/bin/true",
+          ],
+          { cwd: release, env: { HOME: dir, PATH: "/usr/bin:/bin" } },
+        )
+        expect(fixture.exitCode).not.toBe(0)
+        expect(fixture.stderr.toString()).toContain("requires verified Chromium")
+      }
       const inode = lstatSync(release).ino
       expect(stage(bundle!, pin!, dir)).toBe(release)
       expect(lstatSync(release).ino).toBe(inode)
     }, 180000)
   },
+)
+
+const minimal = process.env.T1OS_MINIMAL_BUNDLE,
+  minPin = process.env.T1OS_MINIMAL_SHA256
+test.skipIf(!minimal && !minPin)(
+  "exact minimal media carries just the CLI and offline provisioning foundation",
+  () => {
+    if (!minimal || !minPin) throw Error("expected both minimal media and pin")
+    const dir = mkdtempSync(join(tmpdir(), "t1os-minimal-"))
+    try {
+      const release = stage(minimal, minPin, dir)
+      expect(readFileSync(join(release, "runtime/profile.json"), "utf8")).toBe(
+        '{"profile":"minimal"}\n',
+      )
+      expect(readdirSync(join(release, "runtime")).sort()).toEqual(["install.sh", "profile.json"])
+      expect(readdirSync(release).sort()).toEqual(["bin", "platform", "runtime"])
+      expect(Bun.spawnSync([join(release, "bin/t1os"), "--help"]).exitCode).toBe(0)
+      expect(stage(minimal, minPin, dir)).toBe(release)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  120_000,
 )

@@ -1,4 +1,4 @@
-# Build the optional agent host payload
+# Build the default full agent host payload
 
 Prepare on Linux x86_64 as a normal user. The operator supplies the official
 [T3 Code 0.1.10 Linux x64 archive][release]. Its SHA-256 matches the upstream GitHub release API
@@ -13,8 +13,8 @@ From the reviewed t1os checkout used to build the overlay:
 ```sh
 mise exec -- bun apps/agent-host/src/cli.ts prepare \
   --t3-archive /path/to/t3-0.1.10-linux-x64.tar.gz \
-  --output /path/to/artifacts/agent-tools
-bun apps/agent-host/src/smoke.ts --tools /path/to/artifacts/agent-tools
+  --output /path/to/artifacts/agent-host
+bun apps/agent-host/src/smoke.ts --tools /path/to/artifacts/agent-host
 ```
 
 The first command installs only the `@t1os/agent-host` workspace's production npm dependencies

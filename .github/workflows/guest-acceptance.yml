@@ -105,6 +105,8 @@ jobs:
             --cli "$TMPDIR/t1os-cli" --agent-tools "$TMPDIR/tools" --holyagent "$TMPDIR/holyagent.tgz" \
             --output "$TMPDIR/t1os.tar"
           digest=$(sha256sum "$TMPDIR/t1os.tar" | cut -d' ' -f1)
+          bun apps/platform/src/build-bundle.ts --profile minimal --commit "$(git rev-parse HEAD)" --cli "$TMPDIR/t1os-cli" --output "$TMPDIR/minimal.tar"
+          T1OS_MINIMAL_BUNDLE="$TMPDIR/minimal.tar" T1OS_MINIMAL_SHA256="$(sha256sum "$TMPDIR/minimal.tar" | cut -d' ' -f1)" \
           T1OS_ACCEPTANCE_BUNDLE="$TMPDIR/t1os.tar" T1OS_ACCEPTANCE_SHA256="$digest" bun test apps/platform/acceptance/media.test.ts
           bun apps/platform/src/omarchy-vm.ts --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
             --public-key "$TMPDIR/omarchy.asc" --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \

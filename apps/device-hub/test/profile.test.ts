@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 
-import { hubSettings, launchArguments } from "../src/profile.ts"
+import { hubSettings } from "../src/lock.ts"
+import { launchArguments } from "../src/profile.ts"
 
 test("scoped setup preserves Pi and does not enable agent control", () => {
   const settings = { providerInstances: { pi: { driver: "pi", enabled: true } }, telemetry: false }

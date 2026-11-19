@@ -1,16 +1,6 @@
 // Invoked by the full profile's verified Bun, never during ordinary provisioning.
 import { constants } from "node:fs"
-import {
-  access,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises"
+import { access, lstat, mkdir, readFile, realpath } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -34,39 +24,6 @@ const env = {
   ...(process.env.DBUS_SESSION_BUS_ADDRESS
     ? { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS }
     : {}),
-}
-
-/** Merge only local device support, rejecting previous permission for agent or remote access. */
-export function hubSettings(input: unknown) {
-  if (typeof input !== "object" || input === null || Array.isArray(input))
-    throw Error("Invalid T3 settings object")
-  const settings = input as Record<string, unknown>
-  for (const field of ["deviceHosts", "easDeviceHosts", "simlockDeviceHosts"]) {
-    if (field in settings && (!Array.isArray(settings[field]) || settings[field].length !== 0))
-      throw Error("Non-local Device Hub settings: review manually")
-  }
-  if ("projectSettingsOverrides" in settings) {
-    const overrides = settings.projectSettingsOverrides
-    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides))
-      throw Error("Invalid project overrides: review manually")
-    for (const value of Object.values(overrides)) {
-      if (
-        !value ||
-        typeof value !== "object" ||
-        Array.isArray(value) ||
-        ("enableAgentDeviceAccess" in value && value.enableAgentDeviceAccess !== false)
-      )
-        throw Error("Existing or ambiguous project agent device access: review manually")
-    }
-  }
-  if (settings.enableAgentDeviceAccess !== undefined && settings.enableAgentDeviceAccess !== false)
-    throw Error("Existing agent access: review manually")
-  return {
-    ...settings,
-    enableDeviceSupport: true,
-    deviceOnboardingCompleted: true,
-    enableAgentDeviceAccess: false,
-  }
 }
 
 /** Keep local ADB's addressing and the single managed AVD explicit. */
@@ -109,7 +66,6 @@ async function preflight() {
     join(manager, "avdmanager"),
     join(manager, "sdkmanager"),
     "/usr/bin/ffmpeg",
-    "/usr/bin/npm",
     "/usr/bin/java",
   ])
     await access(file, constants.X_OK)
@@ -136,44 +92,8 @@ async function secureDir(folder: string) {
     throw Error(`Unsafe directory: ${folder}`)
 }
 
-async function installUnit(source: string, target: string) {
-  await secureDir(dirname(target))
-  const data = await readFile(join(import.meta.dir, "../../../runtime/android", source))
-  try {
-    await writeFile(target, data, { flag: "wx", mode: 0o600 })
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err
-    const st = await lstat(target)
-    if (
-      !st.isFile() ||
-      st.uid !== process.getuid!() ||
-      st.mode & 0o022 ||
-      !data.equals(await readFile(target))
-    )
-      throw Error(`Existing unit differs: ${target}`)
-  }
-}
-
 async function configure() {
   await preflight()
-  if (
-    (await run([
-      "/usr/bin/systemctl",
-      "--user",
-      "show",
-      "-p",
-      "ActiveState",
-      "--value",
-      "t1os-t3.service",
-    ])) !== "inactive"
-  )
-    throw Error("Stop t1os-t3.service before setup")
-  const file = join(home, ".t3/userdata/settings.json")
-  await secureDir(dirname(file))
-  const st = await lstat(file)
-  if (!st.isFile() || st.uid !== process.getuid!() || st.mode & 0o022 || st.size > 1048576)
-    throw Error("Unsafe or oversized T3 settings")
-  const conf = hubSettings(JSON.parse(await readFile(file, "utf8")))
   await secureDir(join(home, ".android/avd"))
   const avdConfig = join(home, ".android/avd", name + ".avd/config.ini")
   if (!(await run([emulator, "-list-avds"])).split(/\s+/).includes(name)) {
@@ -195,18 +115,6 @@ async function configure() {
   const config = await readFile(avdConfig, "utf8")
   if (!/^image\.sysdir\.1\s*=\s*system-images\/android-35\/default\/x86_64\/?\s*$/m.test(config))
     throw Error("Existing AVD does not use the managed image")
-  const units = join(home, ".config/systemd/user")
-  await installUnit("t1os-android.service", join(units, "t1os-android.service"))
-  await installUnit("android.conf", join(units, "t1os-t3.service.d/android.conf"))
-  const temp = await mkdtemp(join(dirname(file), ".t1os-device-"))
-  try {
-    const next = join(temp, "settings.json")
-    await writeFile(next, JSON.stringify(conf, null, 2) + "\n", { mode: 0o600 })
-    await rename(next, file)
-  } finally {
-    await rm(temp, { recursive: true, force: true })
-  }
-  await run(["/usr/bin/systemctl", "--user", "daemon-reload"])
 }
 
 /** Verify a confirmed identity before accepting guest boot; transport churn is retryable. */
@@ -250,6 +158,10 @@ if (import.meta.main) {
   )
     throw Error("Run only as the t1os operator in the supported x86-64 Linux guest")
   switch (process.argv[2]) {
+    case "start":
+      await configure()
+      await run(["/usr/bin/systemctl", "--user", "start", "t1os-android.service"])
+      break
     case "configure":
       await configure()
       break
@@ -270,6 +182,6 @@ if (import.meta.main) {
       await waitForBoot((args, ms) => run([adb, ...args], undefined, ms))
       break
     default:
-      throw Error("Expected check, configure, boot, or ready")
+      throw Error("Expected start, check, configure, boot, or ready")
   }
 }

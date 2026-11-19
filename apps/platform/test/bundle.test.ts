@@ -150,3 +150,64 @@ test("guest unpack rejects an independently constructed tar containing an unrevi
     expect(readdirSync(releases)).toHaveLength(0)
   })
 })
+
+test("default full cannot silently fall back to minimal", async () => {
+  const { selectProfile, main } = await import("../src/build-bundle.ts")
+  expect(selectProfile()).toBe("full")
+  expect(selectProfile("full")).toBe("full")
+  expect(selectProfile("minimal")).toBe("minimal")
+  expect(() => selectProfile("auto")).toThrow()
+  const impossible = join(tmpdir(), "t1os-not-real/agent-host")
+  await expect(
+    main(["--commit", "0".repeat(40), "--output", "unused", "--agent-tools", impossible]),
+  ).rejects.toThrow("Full is the default")
+  await expect(
+    main([
+      "--profile",
+      "minimal",
+      "--commit",
+      "0".repeat(40),
+      "--output",
+      "unused",
+      "--agent-tools",
+      impossible,
+    ]),
+  ).rejects.toThrow("minimal does not accept")
+})
+
+test("profile markers cannot disguise omitted full capabilities or additions to minimal", () => {
+  temporary((dir) => {
+    const releases = join(dir, "releases")
+    mkdirSync(releases)
+    for (const [profile, extra, error] of [
+      ["full", "", "incomplete full"],
+      ["minimal", "runtime/intruder", "unexpected capability"],
+      ["unknown", "", "invalid bundle"],
+    ] as const) {
+      const archive = join(dir, profile + ".tar")
+      const hash = build(archive, (w) => {
+        for (const name of [
+          "bin/t1os",
+          "bin/t1os-guest-platform",
+          "runtime/install.sh",
+          "platform/first-boot",
+          "platform/t1os-first-boot.service",
+        ])
+          w.bytes(name, Buffer.from("fixture"), 0o755)
+        w.bytes("runtime/profile.json", Buffer.from(JSON.stringify({ profile }) + "\n"), 0o644)
+        if (extra) w.bytes(extra, Buffer.from("fixture"), 0o644)
+      })
+      expect(() => stage(archive, hash, releases)).toThrow(error)
+    }
+  })
+})
+
+test("profile marker is length bounded before being buffered", () => {
+  temporary((dir) => {
+    const archive = join(dir, "oversized.tar"),
+      releases = join(dir, "releases")
+    mkdirSync(releases)
+    const hash = build(archive, (w) => w.bytes("runtime/profile.json", Buffer.alloc(64), 0o644))
+    expect(() => stage(archive, hash, releases)).toThrow("invalid bundle profile size")
+  })
+})
