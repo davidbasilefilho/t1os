@@ -224,9 +224,16 @@ def checkpoint_probe(release, initial):
         raise ValueError("checkpoint could not be reopened by the operator")
 
 
+def phase(label):
+    """Emit a fixed, non-sensitive progress label, never a command, path or credential."""
+    with open("/dev/ttyS0", "w") as output:
+        print("T1OS_PHASE", label, file=output, flush=True)
+
+
 def main():
     """Bootstrap once. Subsequent boots verify the active release, never reinstall the original."""
     assert_machine()
+    phase("machine-verified")
     expected = read_sha(BOOT / "expected-sha256")
     STATE.mkdir(mode=0o700, exist_ok=True)
     trusted(STATE, directory=True)
@@ -238,13 +245,16 @@ def main():
                 raise ValueError("initial receipt conflicts with the provisioned media")
             active = read_sha(STATE / "applied")
             verify_current_boot(active)
+            phase("current-boot-verified")
             verify(active)
             checkpoint_probe(BASE / 'releases' / active, initial=False)
             return active
         spec = importlib.util.spec_from_file_location("t1os_provision", BOOT / "provision.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        phase("preparing-candidate")
         deploy(module, expected)
+        phase("candidate-promoted")
         verify(expected)
         checkpoint_probe(BASE / 'releases' / expected, initial=True)
         receipt(done, expected)

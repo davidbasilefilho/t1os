@@ -246,10 +246,10 @@ print(json.dumps({'event':'SHUTDOWN','data':{'guest':reason.startswith('guest'),
             # Arrange immutable host-side script/unit fixtures independently of the actual OS.
             source = state / "source"
             source.mkdir()
-            for name in ("t1os-bootstrap.py", "provision.py", unattended_vm.UNIT):
+            for name in ("t1os-bootstrap.py", "provision.py", unattended_vm.UNIT, "qa-power-button.conf"):
                 (source / name).touch(mode=0o600)
-            response = ("btrfs\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\n"
-                        "false\nfalse\n/var/lib/pacman/local/omarchy-4.5.0-1/desc\n")
+            response = "\n".join(["btrfs", *(["true"] * 4), *(["false"] * 9),
+                                  "/var/lib/pacman/local/omarchy-4.5.0-1/desc", ""])
             with patch.object(unattended_vm, "guestfish_commands", return_value="no root") as fish:
                 with self.assertRaisesRegex(ValueError, "no write"):
                     unattended_vm.stage(disk, state, fixture, "c" * 64, "4.5.0", 1, True)
@@ -265,6 +265,8 @@ print(json.dumps({'event':'SHUTDOWN','data':{'guest':reason.startswith('guest'),
                 self.assertIn(("ln-s", "/dev/null", "/etc/systemd/system/sshd.socket"), commands)
                 self.assertIn(("ln-s", "/dev/null", "/etc/systemd/system/display-manager.service"), commands)
                 self.assertIn(("upload", str(fixture), "/opt/t1os/bootstrap/t1os.tar"), commands)
+                self.assertIn(("upload", str(source / "qa-power-button.conf"), unattended_vm.QA_POWER), commands)
+                self.assertIn("HandlePowerKey=poweroff", (HERE / "qa-power-button.conf").read_text().splitlines())
                 self.assertNotIn("command", [command[0] for command in commands])
 
 

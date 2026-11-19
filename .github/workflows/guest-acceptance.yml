@@ -111,6 +111,6 @@ jobs:
           /usr/bin/python3 platform/omarchy-vm.py --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
             --public-key "$TMPDIR/omarchy.asc" --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --bundle "$TMPDIR/t1os.tar" \
-            --bundle-sha256 "$digest" --phase-timeout 3000 --accel kvm \
+            --bundle-sha256 "$digest" --phase-timeout 1250 --accel kvm \
             --apply --confirm ERASE-NEW-DISPOSABLE-VM-DISK
           echo "Two installed boots verified for $(git rev-parse HEAD), overlay $digest" >> "$GITHUB_STEP_SUMMARY"

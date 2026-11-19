@@ -19,9 +19,14 @@ SOURCE = Path(__file__).resolve().parent
 BOOTSTRAP = "/opt/t1os/bootstrap"
 UNIT_DIR = "/etc/systemd/system"
 UNIT = "t1os-bootstrap.service"
+LOGIND = "/etc/systemd/logind.conf.d"
+QA_POWER = f"{LOGIND}/99-t1os-disposable-power-button.conf"
 ROOT_PARTITION = "/dev/sda2"
 MARKER = "T1OS_READY"
 FAILED_MARKER = b"T1OS_FAILED"
+SAFE_PHASES = {b"T1OS_PHASE " + name for name in (
+    b"machine-verified", b"preparing-candidate", b"candidate-promoted", b"current-boot-verified"
+)}
 MAX_SERIAL = 1024**2
 
 
@@ -82,6 +87,7 @@ def stage(disk, state, bundle, digest, version, timeout, tcg):
         ("is-dir", "/etc"),
         ("is-dir", UNIT_DIR),
         ("is-symlink", "/etc/systemd"),
+        ("is-symlink", LOGIND), ("exists", QA_POWER), ("is-symlink", QA_POWER),
         ("is-symlink", f"{UNIT_DIR}/multi-user.target.wants"),
         ("exists", f"{UNIT_DIR}/{UNIT}"),
         ("is-symlink", f"{UNIT_DIR}/{UNIT}"),
@@ -91,7 +97,7 @@ def stage(disk, state, bundle, digest, version, timeout, tcg):
         ("umount-all",),
     ]
     lines = guestfish_commands(disk, read, True, timeout, tcg).splitlines()
-    expected = ["btrfs", "true", "true", "true", "true", "false", "false", "false", "false", "false", "false"]
+    expected = ["btrfs", "true", "true", "true", "true", *(["false"] * 9)]
     if lines[:-1] != expected or not lines or not re.fullmatch(
         rf"/var/lib/pacman/local/omarchy-{re.escape(version)}-[^/\s]+/desc", lines[-1]
     ):
@@ -105,6 +111,7 @@ def stage(disk, state, bundle, digest, version, timeout, tcg):
         (bundle, f"{BOOTSTRAP}/t1os.tar", "0600"),
         (digest_file, f"{BOOTSTRAP}/expected-sha256", "0600"),
         (SOURCE / UNIT, f"{UNIT_DIR}/{UNIT}", "0644"),
+        (SOURCE / "qa-power-button.conf", QA_POWER, "0644"),
     ]
     for source, _, _ in trusted:
         if not stat.S_ISREG(source.lstat().st_mode):
@@ -112,7 +119,7 @@ def stage(disk, state, bundle, digest, version, timeout, tcg):
     write = [
         ("set-network", "false"), ("run",),
         ("mount-vfs", "rw,subvol=@", "btrfs", ROOT_PARTITION, "/"),
-        ("mkdir-p", BOOTSTRAP),
+        ("mkdir-p", BOOTSTRAP), ("mkdir-p", LOGIND),
         ("chown", "0", "0", "/opt/t1os"),
         ("chown", "0", "0", BOOTSTRAP),
         ("chmod", "0755", "/opt/t1os"),
@@ -160,6 +167,7 @@ def run_qmp(command, *, phase, serial, deadline, digest=None):
     next_power_request = 0.0
     serial_pos = 0
     pending = b""
+    reported = set()
     # No QMP/VNC sockets. QMP stdio is a private pipe; serial bytes go to private local storage.
     with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1) as qemu:
         threading.Thread(target=read_qmp, args=(qemu.stdout, messages), daemon=True).start()
@@ -175,10 +183,15 @@ def run_qmp(command, *, phase, serial, deadline, digest=None):
                     # splitlines accepts bare CR as well as CRLF; wait for the actual LF before matching.
                     records = (pending + chunk).split(b"\n")
                     pending = records.pop()
+                    for label in (line.rstrip(b"\r") for line in records):
+                        if label in SAFE_PHASES and label not in reported:
+                            print(f"{phase}: {label.decode('ascii')}", flush=True)
+                            reported.add(label)
                     if any(line.rstrip(b"\r") == FAILED_MARKER for line in records):
                         raise ValueError(f"{phase}: guest bootstrap reported failure")
                     if any(line.rstrip(b"\r") == expected for line in records):
                         ready = True
+                        print(f"{phase}: verified release receipt; waiting for orderly guest shutdown.", flush=True)
                 if ready and not shutdown and time.monotonic() >= next_power_request:
                     # The marker can precede logind's activation; retry the same ACPI request later.
                     qemu.stdin.write('{"execute":"system_powerdown","id":"shutdown"}\n')
@@ -202,8 +215,8 @@ def run_qmp(command, *, phase, serial, deadline, digest=None):
                     shutdown = ready if expected else True
                 elif record.get("event") == "SHUTDOWN":
                     raise ValueError(f"{phase}: unexpected guest shutdown reason")
-            raise ValueError(f"{phase}: timed out waiting for "
-                             + ("verified first-boot marker/shutdown" if expected else "stock installer reboot"))
+            waiting = ("orderly shutdown after verified receipt" if ready else "verified first-boot marker") if expected else "stock installer reboot"
+            raise ValueError(f"{phase}: timed out waiting for {waiting}")
         finally:
             if qemu.poll() is None:
                 qemu.terminate()
