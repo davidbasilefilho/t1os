@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { isAbsolute, join } from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { stage } from "./stage"
+import { DEVICE_TOOLS, HUB_ENTRY, HUB_VERSION, stage } from "./stage"
 
 const REQUIRED = [
   "Agent",
@@ -106,6 +106,40 @@ async function probe(release: string) {
       if ((await version([binary, "--version"], home, env)) !== expected)
         throw new Error(`${binary}: expected ${expected}`)
     }
+    const hub = join(home, ".t3/tools/expo-device-hub", HUB_VERSION)
+    const cache = join(hub, "node_modules")
+    if (
+      (await readFile(join(hub, ".install-complete"), "utf8")).trim() !== HUB_VERSION ||
+      (await realpath(join(cache, HUB_ENTRY))) !== (await realpath(join(modules, HUB_ENTRY)))
+    )
+      throw new Error("T3 Device Hub cache incomplete")
+    const agentTool = DEVICE_TOOLS[1]
+    const agentCache = join(home, ".t3/tools", agentTool.name, agentTool.version)
+    if (
+      (await readFile(join(agentCache, ".install-complete"), "utf8")).trim() !==
+        agentTool.version ||
+      (await realpath(join(agentCache, "node_modules", agentTool.entry))) !==
+        (await realpath(join(modules, agentTool.entry)))
+    )
+      throw new Error("inert agent-device cache incomplete")
+    const agentHelp = await version(
+      [join(bin, "node"), join(agentCache, "node_modules", agentTool.entry), "--help"],
+      home,
+      env,
+    )
+    if (!agentHelp.includes("agent-device")) throw new Error("unexpected agent-device CLI")
+    const help = await version([join(bin, "node"), join(cache, HUB_ENTRY), "--help"], home, env)
+    if (!help.includes("--hide-boot-device") || !help.includes("--platform"))
+      throw new Error("unexpected Device Hub CLI")
+    await version(
+      [
+        join(bin, "node"),
+        "-e",
+        'const n = require("node-datachannel"); if (typeof n.PeerConnection !== "function") process.exit(2); n.cleanup()',
+      ],
+      cache,
+      env,
+    )
     const work = join(home, "worktree")
     await mkdir(work)
     await writeFile(join(work, "fixture.txt"), "private readiness marker")

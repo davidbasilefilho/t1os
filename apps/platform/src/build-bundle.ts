@@ -18,7 +18,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { allowed, MAX_BYTES, MAX_ENTRIES } from "./overlay.ts"
+import { allowed, androidProfileFiles, MAX_BYTES, MAX_ENTRIES } from "./overlay.ts"
 
 const root = resolve(import.meta.dir, "../../..")
 const holyAgentDigest =
@@ -81,7 +81,10 @@ function requireCleanSource(commit: string) {
 }
 
 /** Build the standalone x86_64 Linux guest bootstrap from a clean checkout. */
-export async function buildGuestExecutable(outputPath: string): Promise<void> {
+export async function buildGuestExecutable(
+  outputPath: string,
+  entry = "apps/platform/src/guest.ts",
+): Promise<void> {
   if (process.platform !== "linux" || process.arch !== "x64" || Bun.version !== "1.4.4") {
     throw new Error("building the guest bootstrap requires Linux x86_64 and the pinned Bun")
   }
@@ -99,7 +102,7 @@ export async function buildGuestExecutable(outputPath: string): Promise<void> {
         "--no-compile-autoload-dotenv",
         "--no-compile-autoload-bunfig",
         "--minify",
-        "apps/platform/src/guest.ts",
+        entry,
         "--outfile",
         bin,
       ],
@@ -283,9 +286,18 @@ function addTools(bundle: BundleWriter, directory: string, prefix: string) {
   }
 }
 
-function addCommittedSources(bundle: BundleWriter, commit: string) {
+/** Full is the default. Missing inputs never silently downgrade the built image. */
+export function selectProfile(value?: string): "full" | "minimal" {
+  if (value === undefined || value === "full") return "full"
+  if (value === "minimal") return "minimal"
+  throw Error("expected --profile full or --profile minimal")
+}
+function addCommittedSources(bundle: BundleWriter, commit: string, profile: "full" | "minimal") {
+  const browserSource = "apps/agent-host/src/browser-smoke.ts"
+  const paths =
+    profile === "full" ? [...required, ...androidProfileFiles, browserSource, "runtime"] : required
   const seen = new Set<string>()
-  for (const entry of git("ls-tree", "-rz", commit, "--", ...required, "runtime")
+  for (const entry of git("ls-tree", "-rz", commit, "--", ...paths)
     .toString()
     .split("\0")
     .filter(Boolean)
@@ -295,12 +307,22 @@ function addCommittedSources(bundle: BundleWriter, commit: string) {
       throw new Error(`unexpected bundle source: ${entry}`)
     }
     const [, mode, oid, name] = match
+    if (name === "runtime/profile.json")
+      throw Error("profile marker must be generated, not supplied as input")
     if (name === holyAgentPath) throw new Error("HolyAgent registry archive must not be committed")
     if (name.startsWith("runtime/tests/")) continue
-    bundle.bytes(name, git("cat-file", "blob", oid), Number.parseInt(mode, 8))
+    bundle.bytes(
+      name === browserSource ? "agent-host/pi-deps/browser-smoke.ts" : name,
+      git("cat-file", "blob", oid),
+      Number.parseInt(mode, 8),
+    )
     seen.add(name)
   }
-  if (!required.every((name) => seen.has(name))) {
+  if (
+    ![...required, ...(profile === "full" ? [...androidProfileFiles, browserSource] : [])].every(
+      (name) => seen.has(name),
+    )
+  ) {
     throw new Error("selected commit does not contain all required platform inputs")
   }
 }
@@ -312,16 +334,37 @@ export async function main(argv: string[]): Promise<void> {
     options: {
       commit: { type: "string" },
       cli: { type: "string" },
+      profile: { type: "string" },
       holyagent: { type: "string" },
       "agent-tools": { type: "string" },
       output: { type: "string" },
     },
   })
-  const { cli, commit, holyagent, output } = values
-  const agentTools = values["agent-tools"]
+  const { cli, commit, output } = values
+  const profile = selectProfile(values.profile)
+  if (profile === "minimal" && (values.holyagent || values["agent-tools"]))
+    throw Error("minimal does not accept full-agent payloads")
+  const holyagent = values.holyagent ?? join(root, "artifacts/holyagent-0.3.3.tgz")
+  const agentTools = values["agent-tools"] ?? join(root, "artifacts/agent-host")
   if (!commit || !output) throw new Error("--commit and --output are required")
-  if (Boolean(holyagent) !== Boolean(agentTools)) {
-    throw new Error("full agent profile requires both --agent-tools and --holyagent")
+  if (profile === "full" && (!existsSync(holyagent) || !existsSync(agentTools)))
+    throw Error(
+      "Full is the default: prepare artifacts/agent-host and artifacts/holyagent-0.3.3.tgz, pass --agent-tools/--holyagent, or explicitly request --profile minimal.",
+    )
+  if (profile === "full") {
+    for (const path of [
+      "bin/node",
+      "bin/bun",
+      "t3-release/t3",
+      "pi-deps/expo-device-hub-version",
+      "pi-deps/agent-device-version",
+      "pi-deps/node_modules/agent-device/bin/agent-device.mjs",
+      "pi-deps/node_modules/playwright-core/package.json",
+      "pi-deps/node_modules/expo-device-hub/dist/server/cli.mjs",
+    ]) {
+      if (!lstatSync(join(agentTools, path), { throwIfNoEntry: false })?.isFile())
+        throw Error("incomplete prepared full profile: " + path)
+    }
   }
   requireCleanSource(commit)
   if (existsSync(output)) throw new Error("bundle output already exists")
@@ -330,15 +373,18 @@ export async function main(argv: string[]): Promise<void> {
     const guest = join(tmp, basename(guestPath))
     const tar = join(tmp, "overlay.tar")
     await buildGuestExecutable(guest)
+    const publicCli = cli ?? join(tmp, "t1os")
+    if (!cli) await buildGuestExecutable(publicCli, "apps/cli/src/cli.ts")
     requireCleanSource(commit)
     const fd = openSync(tar, "wx", 0o600)
     let digest: string
     try {
       const bundle = new BundleWriter(fd)
-      addCommittedSources(bundle, commit)
+      addCommittedSources(bundle, commit, profile)
+      bundle.bytes("runtime/profile.json", Buffer.from(JSON.stringify({ profile }) + "\n"), 0o644)
       bundle.file(guestPath, guest, 0o755)
-      if (cli) bundle.file("bin/t1os", cli, 0o755, undefined, true)
-      if (holyagent && agentTools) {
+      bundle.file("bin/t1os", publicCli, 0o755, undefined, true)
+      if (profile === "full") {
         bundle.file(holyAgentPath, holyagent, 0o644, holyAgentDigest)
         addTools(bundle, agentTools, "agent-host")
       }

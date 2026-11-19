@@ -120,6 +120,13 @@ export async function mainBrowserSmoke(argv: string[]): Promise<void> {
   accessSync(executable, constants.X_OK)
   if (process.geteuid?.() === 0)
     throw new Error("run the sandboxed browser fixture as a non-root user")
+  const version = Bun.spawnSync([executable, "--version"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 5000,
+  })
+  if (!version.success || !version.stdout.toString().match(/(?:^|\s)158\.0\.8127\.18(?:\s|$)/))
+    throw Error("Playwright Core 1.65.0 requires verified Chromium 158.0.8127.18 for this fixture")
   const base = privateDirectory(join(realpathSync(homedir()), ".local", "state", "t1os-browser"))
   const profile = privateDirectory(join(base, workspace))
   const server = fixtureServer()

@@ -23,8 +23,11 @@ function none(argv: string[], name: string) {
 /** Dispatch the installed agent and runtime commands; host tooling has its own entry point. */
 export async function dispatchAgent(command: string, argv: string[]): Promise<void> {
   switch (command) {
-    case "stage":
-      return stage(single(argv, "stage"))
+    case "stage": {
+      const archive = resolve(single(argv, "stage"))
+      const verificationModules = resolve(dirname(archive), "../../agent-host/pi-deps/node_modules")
+      return stage(archive, undefined, undefined, undefined, verificationModules)
+    }
     case "check-ready":
       return mainReady(argv)
     case "install-runtime": {

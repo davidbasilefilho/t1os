@@ -53,6 +53,8 @@ export async function installRuntime(target: string, runtime: string) {
       "remote/10-no-ssh-forwarding.conf",
       "etc/systemd/system/tailscaled.service.d/10-no-ssh-forwarding.conf",
     ],
+    ["android/t1os-android.service", "etc/systemd/user/t1os-android.service"],
+    ["android/android.conf", "etc/systemd/user/t1os-t3.service.d/android.conf"],
     ["desktop/t1os-desktop.service", "etc/systemd/user/t1os-desktop.service"],
     ["agent/t1os-t3.service", "etc/systemd/user/t1os-t3.service"],
   ] as const

@@ -113,12 +113,11 @@ execution and resource enforcement require a guest smoke test.
 the effective OpenSSH restrictions when OpenSSH is available. It does not
 activate systemd services.
 
-`bun apps/agent-host/src/browser-smoke.ts WORKSPACE_ID --chromium /absolute/path/to/chromium` exercises
+On a full installed guest, `t1os browser check WORKSPACE_ID --chromium /absolute/path/to/chromium` exercises
 [Playwright Chromium](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)
 screenshot, input, ARIA and reconnect using its own static loopback fixture,
 a mode-0700 persistent profile per workspace, and Chromium sandboxing. Use a
-reviewed Chromium build matching the Playwright Core version pinned in the Bun
-workspace. The fixture is a development tool and does not install a browser. The CLI
+reviewed Chromium 158.0.8127.18 build matching the bundled Playwright Core 1.65.0. The capability does not install a browser or grant general browsing. The CLI
 takes no target URLs and never imports a personal browser session. Run on a
 network-disabled guest with loopback enabled; the page route is not a network
 sandbox. The host cloud sandbox blocks Chromium's required socket operation,

@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
 import { extractFile, readTar, verifiedArchive } from "./archive"
+import { DEVICE_TOOLS } from "./stage"
 
 const ROOT = resolve(import.meta.dir, "../../..")
 const HERE = join(ROOT, "runtime/agent-host")
@@ -136,7 +137,18 @@ async function stagePi(work: string, destination: string, offline: boolean) {
   if ((await process.exited) !== 0) throw new Error("locked agent host installation failed")
   const modules = join(work, "node_modules")
   await copyRuntimes(modules, join(dirname(destination), "bin"))
-  await copyPi(modules, join(destination, "node_modules"))
+  const stagedModules = join(destination, "node_modules")
+  await copyPi(modules, stagedModules)
+  for (const tool of DEVICE_TOOLS) {
+    const pkg = await Bun.file(join(stagedModules, tool.name, "package.json")).json()
+    if (
+      pkg.name !== tool.name ||
+      pkg.version !== tool.version ||
+      !(await lstat(join(stagedModules, tool.entry))).isFile()
+    )
+      throw new Error("unexpected T3 device tool: " + tool.name)
+    await Bun.write(join(destination, tool.name + "-version"), tool.version + "\n")
+  }
   if (
     !(await Bun.file(
       join(destination, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),

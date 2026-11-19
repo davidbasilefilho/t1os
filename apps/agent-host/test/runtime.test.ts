@@ -57,7 +57,14 @@ test("install copies only managed inert definitions and preserves independent po
       await readFile(join(RUNTIME, "agent/policy.json"), "utf8"),
     )
     const objects = await readdir(root, { recursive: true, withFileTypes: true })
-    expect(objects.filter((x) => x.isFile())).toHaveLength(7)
+    expect(objects.filter((x) => x.isFile())).toHaveLength(9)
+    const android = await readFile(
+      join(root, "etc/systemd/user/t1os-t3.service.d/android.conf"),
+      "utf8",
+    )
+    expect(android).toContain("ANDROID_HOME=")
+    expect(android).not.toMatch(/^(Wants|Requires)=/m)
+    expect(objects.some((x) => x.isSymbolicLink())).toBe(false)
     expect(objects.some((x) => x.isSymbolicLink())).toBe(false)
     await writeFile(policy, '{"different": true}')
     await expect(installRuntime(root, RUNTIME)).rejects.toThrow("existing T3 policy differs")

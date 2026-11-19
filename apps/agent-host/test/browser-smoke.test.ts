@@ -50,3 +50,10 @@ test("browser CLI refuses targets, traversal and non-absolute Chromium binaries"
     "absolute path",
   )
 })
+
+test("browser fixture refuses a mismatched browser before opening any page", async () => {
+  if (!process.geteuid?.()) return
+  await expect(mainBrowserSmoke(["version-test", "--chromium", "/usr/bin/true"])).rejects.toThrow(
+    "requires verified Chromium 158.0.8127.18",
+  )
+})
