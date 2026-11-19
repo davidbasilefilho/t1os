@@ -27,7 +27,7 @@ a device, or make an external connection.
 
 Pass the new directory as `--agent-tools /path/to/artifacts/agent-tools` to the overlay builder,
 alongside the pinned HolyAgent package specified in the deployment instructions. Transfer the built
-overlay and its trusted SHA-256 separately. The prepared tools add roughly 650 MiB to the bundle.
+overlay and its trusted SHA-256 separately. The prepared tools add roughly 600 MiB to the bundle.
 Keep them out of Git.
 
 The guest's Pi entrypoint requires a trusted `/usr/bin/node` at version 22.19.0 or newer. The T3 Code

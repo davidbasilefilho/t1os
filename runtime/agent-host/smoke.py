@@ -16,19 +16,7 @@ from urllib.request import urlopen
 
 PI = "pi-deps/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
 T3 = "t3-release/t3"
-POLICY = """{
-  "schemaVersion": 1,
-  "organization": "t1os",
-  "limits": {
-    "connect": false,
-    "telemetry": false,
-    "browserCookieImport": false,
-    "webhookTasks": false,
-    "providers": { "allowedDrivers": ["pi"] },
-    "updates": { "mode": "off" }
-  }
-}
-"""
+POLICY = Path(__file__).resolve().parents[1] / "agent/policy.json"
 
 
 def loopback():
@@ -52,24 +40,22 @@ def smoke(ready, node):
     loopback()
     with tempfile.TemporaryDirectory(prefix="t1os-agent-smoke-") as state:
         home = Path(state)
-        policy = home / "policy.json"
-        policy.write_text(POLICY)
         t3 = ready / T3
         if check_output([node, ready / PI, "--version"], home).strip() != "1.5.0":
             raise ValueError("wrong staged Pi version")
         if check_output([t3, "--version"], home).strip() != "t3 v0.1.10":
             raise ValueError("wrong staged T3 Code version")
-        if '"connect": false' not in check_output([t3, "policy", "check", policy], home):
+        if '"connect": false' not in check_output([t3, "policy", "check", POLICY], home):
             raise ValueError("pinned T3 does not accept the managed policy")
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as selector:
-            selector.bind(("127.0.0.1", 0))
-            address, port = selector.getsockname()
-        cmd = [t3, "serve", "--mode", "desktop", "--host", address, "--port", str(port),
-               "--base-dir", home / "data", "--no-browser", home]
+        port = 3773
+        cmd = [t3, "serve", "--host", "127.0.0.1", "--port", str(port)]
         # Startup output is deliberately discarded: do not display or preserve a bootstrap credential.
         with subprocess.Popen(cmd, cwd=home, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL, env={"HOME": state, "PATH": "/usr/bin:/bin",
-                                                              "CI": "1", "TERM": "dumb"}) as server:
+                                                              "CI": "1", "TERM": "dumb",
+                                                              "T3CODE_HOME": str(home / ".t3"),
+                                                              "T3CODE_HOST": "127.0.0.1",
+                                                              "T3CODE_PORT": str(port)}) as server:
             try:
                 for _ in range(80):
                     if server.poll() is not None:
