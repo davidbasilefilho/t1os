@@ -105,7 +105,29 @@ def check_package(artifact, dest):
             stage.rename(dest)
 
 
-def stage(artifact, home):
+# Non-GUI features selected by HolyAgent 0.3.3 for its headless Kimi profile.
+# Names map to the exact, integrity-locked apps/agent-host dependency graph.
+FEATURES = {
+    "pi-provider-kimi-code": "0.6.13",
+    "@tintinweb/pi-subagents": "0.23.2",
+    "billion-context": "0.1.213",
+    "@juicesharp/rpiv-todo": "2.15.0",
+    "@juicesharp/rpiv-ask-user-question": "2.15.0",
+    "@aliou/pi-processes": "0.13.6",
+    "@ff-labs/pi-fff": "0.11.0"
+}
+
+
+def keep_link(path, dest):
+    """Pin the managed package at its versioned target without replacing an operator install."""
+    if path.is_symlink() and os.readlink(path) == str(dest):
+        return
+    if path.is_symlink() or path.exists():
+        raise ValueError(f"existing package path differs; left intact: {path}")
+    path.symlink_to(dest, target_is_directory=True)
+
+
+def stage(artifact, home, modules=Path("/opt/t1os/current/agent-host/pi-deps/node_modules")):
     """Prepare an operator's user-scope local Pi extension and enable only T3's Pi driver."""
     if os.geteuid() == 0:
         raise ValueError("refusing to configure root")
@@ -124,16 +146,37 @@ def stage(artifact, home):
         check_package(artifact, dest)
         # Pi's package has external peer imports. Resolve them from the same frozen
         # dependency tree as the Pi host, never from npm or the current worktree.
-        link = store / "node_modules"
-        peers = "/opt/t1os/current/agent-host/pi-deps/node_modules"
-        if link.is_symlink():
-            if os.readlink(link) != peers:
-                raise ValueError("operator peer-dependency link differs; left intact")
-        elif link.exists():
-            raise ValueError("operator peer-dependency path already exists; left intact")
-        else:
-            link.symlink_to(peers, target_is_directory=True)
-        seed(pi, {"packages": [str(dest)]}, lambda conf: isinstance(conf.get("packages"), list) and str(dest) in conf["packages"])
+        keep_link(store / "node_modules", modules)
+        # Pi's TypeScript loader resolves from the logical managed package path, not the link target.
+        keep_link(pi.parent / "node_modules", modules)
+        locations = {"holyagent": (VERSION, dest),
+                     **{package: (version, modules / package) for package, version in FEATURES.items()}}
+        packages = []
+        for package, (version, location) in locations.items():
+            # Use Pi's managed per-user npm layout so HolyAgent doctor recognizes the exact versions.
+            # No package manager or package installation scripts are run on the guest.
+            link = pi.parent / "npm/node_modules" / package
+            private_dir(link.parent, home)
+            keep_link(link, location)
+            packages.append(f"npm:{package}@{version}")
+        seed(pi, {"packages": packages, "defaultProvider": "kimi-coding", "defaultModel": "k3.1-pro",
+                  "defaultThinkingLevel": "high", "codemode": {"mode": "only"}},
+             lambda conf: isinstance(conf.get("packages"), list)
+             and all(pkg in conf["packages"] for pkg in packages))
+        # Seed only reviewed settings, never execute the upstream interactive installer.
+        # No project trust, model credentials, provider grants or display/browser integration.
+        for path, contents in (
+            (pi.parent / "subagents.json", {"disableDefaultAgents": True, "fallbackSubagent": "none"}),
+            (pi.parent / "pi-fff.json", {"mode": "override", "followSymlinks": False}),
+            (home / ".config/billion-context/billion-context.json", {"pi": {"subagents": False}}),
+            (home / ".holyagent/config.json", {"pi": {"features": {"computerUse": False, "browserUse": False}}}),
+        ):
+            private_dir(path.parent, home)
+            def includes(obj, needed):
+                return isinstance(obj, dict) and all(
+                    includes(obj.get(k), v) if isinstance(v, dict) else obj.get(k) == v
+                    for k, v in needed.items())
+            seed(path, contents, lambda conf: includes(conf, contents))
         def provider_enabled(conf):
             providers = conf.get("providerInstances")
             provider = providers.get("pi") if isinstance(providers, dict) else None

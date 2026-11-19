@@ -69,16 +69,41 @@ def expand_t3(archive, destination):
         raise ValueError("T3 Code release is missing an executable server or its web client")
 
 
-def copy_pi(source, destination):
+# The platform packages are optional in general development environments but mandatory on this guest.
+# The source archives are integrity pinned in bun.lock. Copy just binaries and license notices.
+RUNTIME_INPUTS = {
+    "node-linux-x64": ("node", "a7ec1b37e6ff9d187e4198c5b6df9a4eb1c74dd31804fb3bac55cc4ceca1ac01"),
+    "@oven/bun-linux-x64": ("bun", "10702245766b225e70bbf6235fd6b47214fd94b4760d00ffaed8ab0df57ac235"),
+}
+
+
+def copy_runtimes(modules, bindir):
+    """Reject missing/substituted machine runtimes before they can execute in a guest."""
+    bindir.mkdir(exist_ok=True)
+    for package, (name, digest) in RUNTIME_INPUTS.items():
+        source = modules / package / "bin" / name
+        if not stat.S_ISREG(source.lstat().st_mode):
+            raise ValueError(f"expected locked Linux {name} binary")
+        with source.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
+                raise ValueError(f"{name} executable digest mismatch")
+        shutil.copy2(source, bindir / name)
+        for notice in (modules / package).glob("LICENSE*"):
+            if notice.is_file():
+                shutil.copyfile(notice, bindir / f"{name}-{notice.name}")
+
+
+def copy_pi(source, destination, root=None):
     """Copy hoisted production dependencies; no workspace links or development metadata."""
+    root = root or source
     destination.mkdir(parents=True)
     for child in sorted(source.iterdir()):
-        if child.name.startswith(".") or child.name == "@t1os":
+        if child.name.startswith(".") or child.name == "@t1os" or child.relative_to(root).as_posix() in RUNTIME_INPUTS:
             continue
         mode = child.lstat().st_mode
         target = destination / child.name
         if stat.S_ISDIR(mode):
-            copy_pi(child, target)
+            copy_pi(child, target, root)
         elif stat.S_ISREG(mode):
             shutil.copyfile(child, target)
             target.chmod(0o755 if mode & 0o111 else 0o644)
@@ -103,6 +128,7 @@ def stage_pi(work, destination, offline):
     if offline:
         command.append("--offline")
     subprocess.run(command, cwd=work, check=True)
+    copy_runtimes(work / "node_modules", destination.parent / "bin")
     copy_pi(work / "node_modules", destination / "node_modules")
     pi = destination / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
     if not pi.is_file():
@@ -129,7 +155,6 @@ def main():
         payload.mkdir()
         expand_t3(args.t3_archive, payload / "t3-release")
         stage_pi(work / "locked-workspace", payload / "pi-deps", args.offline)
-        (payload / "bin").mkdir()
         for name in ("pi", "t3code"):
             shutil.copyfile(HERE / name, payload / "bin" / name)
             (payload / "bin" / name).chmod(0o755)

@@ -9,7 +9,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
+
+import unattended_vm
 
 HERE = Path(__file__).resolve().parent
 
@@ -155,6 +159,104 @@ class ProvisionTest(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no files or services changed", result.stdout)
+
+
+
+class UnattendedTest(unittest.TestCase):
+    """Verify exact sequencing and fail-closed controls without touching a real disk."""
+
+    def test_bundle_dry_run_never_reads_files(self):
+        command = [sys.executable, str(HERE / "omarchy-vm.py")]
+        for name in ("iso", "signature", "public-key", "ovmf-code", "ovmf-vars"):
+            command.extend([f"--{name}", "/does-not-exist"])
+        valid = command + ["--bundle", "/missing.tar", "--bundle-sha256", "a" * 64]
+        result = subprocess.run(valid, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("two verified boots", result.stdout)
+        self.assertNotEqual(subprocess.run(valid + ["--overlay-iso", "/missing.iso"],
+                                           capture_output=True).returncode, 0)
+        self.assertNotEqual(subprocess.run(command + ["--bundle", "/missing.tar"],
+                                           capture_output=True).returncode, 0)
+
+    def test_freeze_bundle_rejects_digest_mismatch_and_link(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            source = directory / "bundle"
+            source.write_bytes(b"fixture")
+            link = directory / "link"
+            link.symlink_to(source)
+            expected = hashlib.sha256(b"fixture").hexdigest()
+            with self.assertRaises(OSError):
+                unattended_vm.bundle_input(link, expected, directory)
+            frozen = unattended_vm.bundle_input(source, expected, directory)
+            source.write_bytes(b"modified")
+            self.assertEqual(frozen.read_bytes(), b"fixture")
+            frozen.unlink()
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                unattended_vm.bundle_input(source, expected, directory)
+
+    def test_qmp_requires_guest_reset_and_exact_serial_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            serial = Path(temporary) / "serial.log"
+            mock = """import sys, json, pathlib
+print('{"QMP":{}}', flush=True)
+assert json.loads(sys.stdin.readline())['execute'] == 'qmp_capabilities'
+print('{"return":{}}', flush=True)
+phase, serial, marker = sys.argv[1:]
+if phase == 'installed':
+    pathlib.Path(serial).write_text(marker + chr(13) + chr(10))
+    assert json.loads(sys.stdin.readline())['execute'] == 'system_powerdown'
+    reason = 'guest-shutdown'
+elif phase == 'stock':
+    reason = 'guest-reset'
+else:
+    reason = 'host-qmp-quit'
+print(json.dumps({'event':'SHUTDOWN','data':{'guest':reason.startswith('guest'),'reason':reason}}), flush=True)
+"""
+            digest = "a" * 64
+            for phase in ("stock", "installed"):
+                unattended_vm.run_qmp([sys.executable, "-c", mock, phase, str(serial),
+                                       f"T1OS_READY {digest}"], phase=phase, serial=serial,
+                                      deadline=time.monotonic() + 4,
+                                      digest=digest if phase == "installed" else None)
+            with self.assertRaisesRegex(ValueError, "unexpected guest"):
+                unattended_vm.run_qmp([sys.executable, "-c", mock, "host", str(serial), ""],
+                                      phase="host", serial=serial, deadline=time.monotonic() + 4)
+            with self.assertRaisesRegex(ValueError, "reported failure"):
+                unattended_vm.run_qmp([sys.executable, "-c", mock, "installed", str(serial),
+                                       "T1OS_FAILED"], phase="failed", serial=serial,
+                                      deadline=time.monotonic() + 4, digest=digest)
+
+    def test_offline_stager_requires_stock_root_before_fixed_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            disk = state / "disposable.qcow2"
+            disk.touch(mode=0o600)
+            fixture = state / "t1os.tar"
+            fixture.touch(mode=0o600)
+            # Arrange immutable host-side script/unit fixtures independently of the actual OS.
+            source = state / "source"
+            source.mkdir()
+            for name in ("t1os-bootstrap.py", "provision.py", unattended_vm.UNIT):
+                (source / name).touch(mode=0o600)
+            response = ("btrfs\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\n"
+                        "false\nfalse\n/var/lib/pacman/local/omarchy-4.5.0-1/desc\n")
+            with patch.object(unattended_vm, "guestfish_commands", return_value="no root") as fish:
+                with self.assertRaisesRegex(ValueError, "no write"):
+                    unattended_vm.stage(disk, state, fixture, "c" * 64, "4.5.0", 1, True)
+                self.assertTrue(fish.call_args.args[2])
+                self.assertEqual(fish.call_count, 1)
+            with patch.object(unattended_vm, "SOURCE", source), patch.object(
+                unattended_vm, "guestfish_commands", side_effect=[response, ""]
+            ) as fish:
+                unattended_vm.stage(disk, state, fixture, "c" * 64, "4.5.0", 1, True)
+                self.assertEqual([call.args[2] for call in fish.call_args_list], [True, False])
+                commands = fish.call_args.args[1]
+                self.assertIn(("set-network", "false"), commands)
+                self.assertIn(("ln-s", "/dev/null", "/etc/systemd/system/sshd.socket"), commands)
+                self.assertIn(("ln-s", "/dev/null", "/etc/systemd/system/display-manager.service"), commands)
+                self.assertIn(("upload", str(fixture), "/opt/t1os/bootstrap/t1os.tar"), commands)
+                self.assertNotIn("command", [command[0] for command in commands])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 Description=t1os opt-in Hyprland desktop
 # Missing marker means the optional desktop was not approved for these versions.
 ConditionUser=t1os
-ConditionPathIsNonEmpty=/etc/t1os/desktop-versions
+ConditionFileNotEmpty=/etc/t1os/desktop-versions
 After=graphical-session-pre.target
 StartLimitIntervalSec=120s
 StartLimitBurst=4

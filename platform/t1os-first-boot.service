@@ -6,7 +6,7 @@ Before=multi-user.target
 [Service]
 Type=oneshot
 ExecStart=/opt/t1os/current/platform/first-boot
-TimeoutStartSec=2min
+TimeoutStartSec=5min
 PrivateTmp=yes
 NoNewPrivileges=yes
 

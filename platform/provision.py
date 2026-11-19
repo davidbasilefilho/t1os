@@ -16,7 +16,7 @@ INSTALL_ROOT = Path("/opt/t1os")
 STATE = Path("/var/lib/t1os")
 BOOT_UNIT = Path("/etc/systemd/system/t1os-first-boot.service")
 BASE_VERSION = "4.5.0"
-MAX_BYTES = 768 * 1024**2
+MAX_BYTES = 1280 * 1024**2
 MAX_ENTRIES = 40_000
 HEX = re.compile(r"[0-9a-f]{64}")
 
@@ -28,6 +28,13 @@ def digest_file(stream):
 
 def allowed(name):
     """Allow only overlay sources, excluding metadata, credentials and device paths."""
+    if len(name.encode()) > 4096 or any(not part or part.startswith(".") or len(part.encode()) > 255
+                                        for part in name.split("/")):
+        return False
+    if name.startswith("agent-host/pi-deps/node_modules/"):
+        # Pinned upstream packages ship e.g. Unicode paper names and licenses with spaces.
+        # Never interpret paths as shell; reject backslashes, control chars and nonprintables.
+        return all(c.isprintable() and c != "\\" for c in name)
     return bool(re.fullmatch(r"(?:runtime/[A-Za-z0-9_.@/-]+|platform/(?:first-boot|"
                              r"t1os-first-boot\.service)|bin/t1os|"
                              r"agent-host/(?:bin|pi-deps|t3-release)/[A-Za-z0-9_.@+$/-]+)", name)
@@ -62,27 +69,52 @@ def unpack(stream, destination):
         raise ValueError("required overlay entrypoints are not executable")
 
 
+def consume_media(source, size, accept):
+    """Feed exactly the stat-bounded snapshot length to a writer or hash."""
+    while size:
+        block = source.read(min(1048576, size))
+        if not block:
+            raise ValueError("bundle shrank while copying")
+        size -= len(block)
+        accept(block)
+
+
 def stage(bundle, expected, releases):
-    """Verify and stage bytes in one pass over a private copy of untrusted media."""
+    """Recheck supplied media every time; only new releases need a private copy."""
+    if not HEX.fullmatch(expected):
+        raise ValueError("invalid release digest")
     target = releases / expected
-    with tempfile.TemporaryDirectory(dir=releases, prefix=".stage-") as temporary:
-        temp = Path(temporary)
-        descriptor = os.open(bundle, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor, "rb") as source, tempfile.TemporaryFile(dir=temp) as frozen:
-            info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
-                raise ValueError("bundle must be a regular tar file no larger than 768 MiB")
-            remaining = info.st_size
-            while remaining:
-                block = source.read(min(1048576, remaining))
-                if not block:
-                    raise ValueError("bundle shrank while copying")
-                remaining -= len(block)
-                frozen.write(block)
-            frozen.seek(0)
-            if digest_file(frozen) != expected:
+    descriptor = os.open(bundle, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        def stable():
+            after = os.fstat(source.fileno())
+            if ((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                    != (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)):
+                raise ValueError("bundle changed during verification")
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_BYTES:
+            raise ValueError("bundle must be a regular tar file no larger than 1280 MiB")
+        if target.is_symlink():
+            raise ValueError("staged release is a symlink")
+        if target.exists():
+            staged_info = target.lstat()
+            if not stat.S_ISDIR(staged_info.st_mode) or staged_info.st_uid != os.geteuid() or staged_info.st_mode & 0o022:
+                raise ValueError("unsafe staged release directory")
+            # The deployment lock protects the staged release. Never unpack reapply media.
+            digest = hashlib.sha256()
+            consume_media(source, info.st_size, digest.update)
+            stable()
+            if digest.hexdigest() != expected:
                 raise ValueError("overlay SHA-256 does not match the supplied pin")
-            if not target.exists():
+            return target
+        with tempfile.TemporaryDirectory(dir=releases, prefix=".stage-") as temporary:
+            temp = Path(temporary)
+            with tempfile.TemporaryFile(dir=temp) as frozen:
+                consume_media(source, info.st_size, frozen.write)
+                stable()
+                frozen.seek(0)
+                if digest_file(frozen) != expected:
+                    raise ValueError("overlay SHA-256 does not match the supplied pin")
                 payload = temp / "payload"
                 payload.mkdir()
                 unpack(frozen, payload)
@@ -92,10 +124,23 @@ def stage(bundle, expected, releases):
 
 def link(path, target):
     """Replace a current/previous symlink atomically without dereferencing it."""
+    if path.exists() and not path.is_symlink():
+        raise ValueError(f"refusing to replace a non-managed pointer: {path}")
     temporary = path.with_name("." + path.name)
     temporary.unlink(missing_ok=True)
     temporary.symlink_to(target)
     temporary.replace(path)
+
+
+def assert_disposable_guest():
+    """Require the pinned harness VM, not merely any Arch workstation, rescue ISO or SSH session."""
+    if subprocess.check_output(["systemd-detect-virt", "--vm"], text=True).strip() not in ("kvm", "qemu"):
+        raise ValueError("apply requires the t1os disposable QEMU guest")
+    if Path("/sys/block/vda/serial").read_text().strip() != "T1OS_DISPOSABLE":
+        raise ValueError("unexpected guest disk identity")
+    source = subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", "/"], text=True).strip()
+    if os.path.realpath(source.split("[")[0]) != "/dev/vda2":
+        raise ValueError("expected the installed root of the disposable guest")
 
 
 def installed_only():
@@ -107,6 +152,7 @@ def installed_only():
     tty = os.ttyname(0)
     if not re.fullmatch(r"/dev/tty(?:[1-9][0-9]*|S[0-9]+|AMA[0-9]+)", tty):
         raise ValueError("apply requires a virtual-terminal or serial console")
+    assert_disposable_guest()
     root = subprocess.check_output(["findmnt", "-n", "-o", "FSTYPE", "/"], text=True).strip()
     if root != "btrfs" or Path("/run/archiso").exists():
         raise ValueError("apply requires the installed Btrfs system, not the installer or a container")
@@ -115,25 +161,94 @@ def installed_only():
         raise ValueError(f"expected installed Omarchy {BASE_VERSION}; found {package}")
 
 
-def activate(release):
-    """Update active release and stage a recovery-safe first boot."""
-    if not release.is_dir() or release.is_symlink() or not HEX.fullmatch(release.name):
-        raise ValueError("invalid staged release")
-    current = INSTALL_ROOT / "current"
-    old = current.resolve(strict=True) if current.is_symlink() else None
-    if old != release:
-        if old is not None and old.parent == release.parent and HEX.fullmatch(old.name):
-            link(INSTALL_ROOT / "previous", old)
-        link(current, release)
-    temporary = BOOT_UNIT.with_name("." + BOOT_UNIT.name)
-    with temporary.open("wb") as output:
-        output.write((release / "platform/t1os-first-boot.service").read_bytes())
-    temporary.chmod(0o644)
-    temporary.replace(BOOT_UNIT)
+def record(path, value, mode=0o600):
+    """Atomically replace one root-managed control record, persisting directory metadata."""
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
+        name = Path(tmp.name)
+        try:
+            tmp.write(value)
+            tmp.flush()
+            os.fchmod(tmp.fileno(), mode)
+            os.fsync(tmp.fileno())
+            name.replace(path)
+        finally:
+            name.unlink(missing_ok=True)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def managed_target(name):
+    """Only dereference a managed pointer into this root's private release directory."""
+    pointer = INSTALL_ROOT / name
+    if not pointer.is_symlink():
+        if pointer.exists():
+            raise ValueError(f"{name} is not a managed release pointer")
+        return None
+    target = pointer.resolve(strict=True)
+    if target.parent != INSTALL_ROOT / "releases" or not HEX.fullmatch(target.name) or not target.is_dir():
+        raise ValueError(f"invalid managed {name} release")
+    return target
+
+
+def prepare(release):
+    """Apply candidate setup, without changing current or the applied receipt before success."""
+    subprocess.run([release / "platform/first-boot", "--prepare"], cwd="/", check=True,
+                   stdin=subprocess.DEVNULL, timeout=900, env={"PATH": "/usr/bin:/bin", "LANG": "C"})
+
+
+def enable_unit(release, replace_known=None):
+    """Install only this release's unit or replace a known managed predecessor."""
+    source = (release / "platform/t1os-first-boot.service").read_bytes()
+    if BOOT_UNIT.is_symlink() or (BOOT_UNIT.exists() and not BOOT_UNIT.is_file()):
+        raise ValueError("unsafe installed first-boot unit")
+    if BOOT_UNIT.exists() and BOOT_UNIT.read_bytes() != source:
+        if replace_known is None or BOOT_UNIT.read_bytes() != (replace_known / "platform/t1os-first-boot.service").read_bytes():
+            raise ValueError("refusing to replace an independent first-boot unit")
+    record(BOOT_UNIT, source, 0o644)
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     subprocess.run(["systemctl", "enable", BOOT_UNIT.name], check=True)
-    # Apply now so the next boot reaches the CLI. A failed step remains retryable at boot.
-    subprocess.run(["systemctl", "restart", BOOT_UNIT.name], check=True)
+
+
+def activate(release, check=None):
+    """Promote a prepared candidate only after its checks; preserve the last success on failure."""
+    if (release.parent != INSTALL_ROOT / "releases" or not release.is_dir()
+            or release.is_symlink() or not HEX.fullmatch(release.name)):
+        raise ValueError("invalid staged release")
+    current = INSTALL_ROOT / "current"
+    old = managed_target("current")
+    pending = STATE / "pending"
+    record(pending, (release.name + "\n").encode())
+    try:
+        prepare(release)
+        if check is not None:
+            check(release)
+        enable_unit(release, old)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        # current never moved. Restore staged unit/config content from the last success.
+        # Keep pending for diagnostics and an explicit console recovery/retry.
+        if old is not None and old != release:
+            prepare(old)
+            enable_unit(old, release)
+        raise
+    if old is not None and old != release:
+        link(INSTALL_ROOT / "previous", old)
+    # The current symlink itself is the atomic last-known-good selector. A crash in
+    # the receipt write can be repaired using that same known-good target.
+    if old != release:
+        link(current, release)
+    record(STATE / "applied", (release.name + "\n").encode())
+    pending.unlink()
+
+
+def rollback_target():
+    """An interrupted/failed upgrade rolls back to current; otherwise use the previous success."""
+    target = managed_target("current" if (STATE / "pending").exists() else "previous")
+    if target is None:
+        raise ValueError("no known-good release for rollback; retry a verified bundle from the console")
+    return target
 
 
 def main():
@@ -164,9 +279,7 @@ def main():
     with (STATE / "deployment.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if args.rollback:
-            release = (INSTALL_ROOT / "previous").resolve(strict=True)
-            if release.parent != releases:
-                raise ValueError("previous release points outside the managed directory")
+            release = rollback_target()
         else:
             release = stage(args.bundle, args.sha256, releases)
         activate(release)

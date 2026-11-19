@@ -7,7 +7,12 @@ exec 9>/run/t1os-provision.lock
 flock -x 9
 state=/var/lib/t1os
 base=/opt/t1os
-release=$(readlink -e "$base/current")
+case $#:${1-} in
+  0:) candidate=0; release=$(readlink -e "$base/current") ;;
+  1:--prepare) candidate=1; release=$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")") ;;
+  *) echo 'usage: first-boot [--prepare]' >&2; exit 2 ;;
+esac
+[[ ${release##*/} =~ ^[0-9a-f]{64}$ ]] || { echo 'invalid release digest' >&2; exit 1; }
 [[ ${release%/*} == "$base/releases" ]] || { echo 'invalid active release' >&2; exit 1; }
 [[ $(stat -c '%u:%a' "$release") == '0:755' ]] || { echo 'invalid release ownership' >&2; exit 1; }
 
@@ -49,9 +54,18 @@ if [[ -x $release/bin/t1os ]]; then
 elif [[ $existing_cli == "$managed_cli" ]]; then
   unlink "$public_cli"
 fi
-if [[ -f $release/runtime/agent/holyagent-0.3.3.tgz ]]; then
+if [[ -f $release/runtime/agent/holyagent-0.3.3.tgz || -d $release/agent-host ]]; then
+  [[ -d $release/agent-host && -f $release/runtime/agent/holyagent-0.3.3.tgz ]] ||
+    { echo 'full agent profile requires both the locked agent tools and HolyAgent package' >&2; exit 1; }
+  runuser -u t1os -- env -i HOME=/home/t1os USER=t1os LOGNAME=t1os PATH=/usr/bin:/bin \
+    "$release/runtime/agent-host/check-ready" "$release"
   runuser -u t1os -- env -i HOME=/home/t1os USER=t1os LOGNAME=t1os PATH=/usr/bin:/bin \
     "$release/runtime/agent/stage.py" "$release/runtime/agent/holyagent-0.3.3.tgz"
+fi
+# Promotion is the provisioner's job. Never advertise an unverified candidate as applied.
+if (( candidate )); then
+  echo "t1os candidate prepared: ${release##*/}"
+  exit 0
 fi
 tmp=$(mktemp "$state/.applied.XXXXXX")
 printf '%s\n' "${release##*/}" >"$tmp"

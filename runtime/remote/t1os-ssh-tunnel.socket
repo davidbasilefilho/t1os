@@ -2,8 +2,8 @@
 Description=t1os SSH forwarding on the private Tailscale interface only
 BindsTo=sys-subsystem-net-devices-tailscale0.device
 After=sys-subsystem-net-devices-tailscale0.device tailscaled.service
-ConditionPathIsNonEmpty=/etc/t1os/authorized_keys
-ConditionPathIsNonEmpty=/etc/ssh/ssh_host_ed25519_key
+ConditionFileNotEmpty=/etc/t1os/authorized_keys
+ConditionFileNotEmpty=/etc/ssh/ssh_host_ed25519_key
 
 [Socket]
 ExecStartPre=/usr/bin/bash /opt/t1os/current/runtime/remote/check-tailscale

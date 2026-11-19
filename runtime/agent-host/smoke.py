@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import json
 import os
 from pathlib import Path
 import socket
@@ -49,50 +50,62 @@ def smoke(ready, node):
             raise ValueError("pinned T3 does not accept the managed policy")
         port = 3773
         cmd = [t3, "serve", "--host", "127.0.0.1", "--port", str(port)]
-        # Startup output is deliberately discarded: do not display or preserve a bootstrap credential.
-        with subprocess.Popen(cmd, cwd=home, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, env={"HOME": state, "PATH": "/usr/bin:/bin",
-                                                              "CI": "1", "TERM": "dumb",
-                                                              "T3CODE_HOME": str(home / ".t3"),
-                                                              "T3CODE_HOST": "127.0.0.1",
-                                                              "T3CODE_PORT": str(port)}) as server:
-            try:
-                for _ in range(80):
-                    if server.poll() is not None:
-                        raise ValueError("T3 exited before starting its loopback server")
-                    try:
-                        with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
-                            if response.status == 200 and response.read(4096):
-                                break
-                    except URLError:
-                        time.sleep(0.25)
-                else:
-                    raise ValueError("T3 did not respond in the isolated namespace")
-                addresses = set()
-                for protocol in ("tcp", "tcp6"):
-                    with Path(f"/proc/net/{protocol}").open() as table:
-                        next(table)
-                        for line in table:
-                            _, local, _, state, *_ = line.split()
-                            if state == "0A" and local.endswith(f":{port:04X}"):
-                                addresses.add(local)
-                if addresses != {f"0100007F:{port:04X}"}:
-                    raise ValueError("T3 was not bound exclusively to 127.0.0.1")
-            finally:
-                server.terminate()
+        settings = home / ".t3/userdata/settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text('{"providerInstances":{"pi":{"driver":"pi","enabled":true}}}')
+        worktree = home / "worktrees/example"
+        worktree.mkdir(parents=True)
+        note = worktree / "uncommitted.txt"
+        note.write_text("saved before T3 restart")
+        for _ in range(2):
+            # Startup output is deliberately discarded: do not display or preserve a bootstrap credential.
+            with subprocess.Popen(cmd, cwd=home, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, env={"HOME": state, "PATH": f"{ready}/bin:/usr/bin:/bin",
+                                                                  "CI": "1", "TERM": "dumb",
+                                                                  "T3CODE_HOME": str(home / ".t3"),
+                                                                  "T3CODE_HOST": "127.0.0.1",
+                                                                  "T3CODE_PORT": str(port)}) as server:
                 try:
-                    server.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-    print("Pi 1.5.0 and T3 Code 0.1.10: versions, policy syntax and isolated loopback HTTP passed")
+                    for _ in range(80):
+                        if server.poll() is not None:
+                            raise ValueError("T3 exited before starting its loopback server")
+                        try:
+                            with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
+                                if response.status == 200 and response.read(4096):
+                                    break
+                        except URLError:
+                            time.sleep(0.25)
+                    else:
+                        raise ValueError("T3 did not respond in the isolated namespace")
+                    addresses = set()
+                    for protocol in ("tcp", "tcp6"):
+                        with Path(f"/proc/net/{protocol}").open() as table:
+                            next(table)
+                            for line in table:
+                                _, local, _, state, *_ = line.split()
+                                if state == "0A" and local.endswith(f":{port:04X}"):
+                                    addresses.add(local)
+                    if addresses != {f"0100007F:{port:04X}"}:
+                        raise ValueError("T3 was not bound exclusively to 127.0.0.1")
+                finally:
+                    server.terminate()
+                    try:
+                        server.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        server.kill()
+            entry = json.loads(settings.read_text())["providerInstances"]["pi"]
+            if entry.get("driver") != "pi" or entry.get("enabled") is not True or note.read_text() != "saved before T3 restart":
+                raise ValueError("T3 restart did not preserve the settings and disposable worktree")
+    print("Pi 1.5.0 and T3 Code 0.1.10: versions, policy syntax, two isolated loopback startups and file persistence passed")
 
 
 def main():
     """Require an isolated Linux namespace; never fall back to host networking."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools", type=Path, required=True)
-    parser.add_argument("--node", type=Path, default=Path("/usr/bin/node"))
+    parser.add_argument("--node", type=Path, help="optional independent Pi host for development-only compatibility checks")
     args = parser.parse_args()
+    args.node = args.node or (args.tools / "bin/node")
     inherited = os.environ.get("T1OS_SMOKE_PARENT_NET")
     if not inherited:
         if os.geteuid() == 0:

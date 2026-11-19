@@ -93,6 +93,8 @@ fixture.
 
 ## Rootless CLI jobs
 
+Run jobs from the authenticated non-admin **operator shell**, not from the T3 service. T3 sets `NoNewPrivileges`; subordinate-ID helper execution may be blocked there. Do not weaken the service or add a privileged Podman socket to work around this.
+
 Run `runtime/run-job WORKSPACE IMAGE@sha256:DIGEST ro|rw COMMAND [ARG...]`
 as `t1os` after staging a reviewed image by digest into rootless Podman storage.
 The wrapper never pulls an image or attaches a network. It mounts only the

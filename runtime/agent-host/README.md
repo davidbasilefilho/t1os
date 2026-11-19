@@ -20,17 +20,25 @@ python3 runtime/agent-host/smoke.py --tools /path/to/artifacts/agent-tools
 The first command installs only the `@t1os/agent-host` workspace's production npm dependencies
 from `bun.lock`, with lifecycle scripts disabled. Add `--offline` if Bun's package cache contains
 all locked dependencies. It writes a new output directory and does not start a service.
-The smoke test needs Linux user and network namespaces and fails rather than using host networking.
-It validates the policy file's syntax, Pi and T3 Code versions, and T3 Code's loopback HTTP startup
-using temporary home and state directories. It does not enable providers, enroll Tailscale, pair
-a device, or make an external connection.
+The smoke uses separate Linux user and network namespaces and fails instead of using host networking.
+It checks the pinned Pi/T3 versions and managed policy syntax. It starts the real T3 binary twice
+in one disposable HOME, checks both listeners/HTTP responses, and verifies the operator settings
+and an uncommitted worktree file survive restart. It does not pair a device or resume a live thread.
 
-Pass the new directory as `--agent-tools /path/to/artifacts/agent-tools` to the overlay builder,
-alongside the pinned HolyAgent package specified in the deployment instructions. Transfer the built
-overlay and its trusted SHA-256 separately. The prepared tools add roughly 600 MiB to the bundle.
-Keep them out of Git.
+Pass that directory as `--agent-tools` alongside the pinned HolyAgent package to the overlay builder.
+Transfer the built overlay and its trusted SHA-256 separately. The prepared tools themselves are
+about 1 GB (33,029 files before the standalone t1os CLI and HolyAgent archive). Keep them out of Git.
 
-The guest's Pi entrypoint requires a trusted `/usr/bin/node` at version 22.19.0 or newer. The T3 Code
-release includes its own native server and adjacent client assets, so it does not use npm or Bun at
-runtime. Nothing installs or updates dependencies on first boot; upgrades replace the verified
-bundle.
+The guest uses frozen Linux x64 releases of Node 24.22.3 and Bun 1.4.4 from this very bundle,
+not an admin's mise installation or a system package manager. Exact executable SHA-256 digests
+are checked at build time. The Pi wrapper disables automatic network fetches (Pi's offline switch);
+this is not a firewall or an authorization to use a model. The production dependency graph
+includes native Linux FFF plus the [pinned headless feature set](../agent/README.md).
+
+To validate an extracted candidate, run `runtime/agent-host/check-ready /absolute/release`
+as the non-root operator. It builds a disposable clean HOME using the same registration routine as
+the installed profile, with links to that candidate (not the active release). In a private network
+namespace it checks exact versions, exercises a native FFF search on one synthetic file, and starts
+real Pi RPC with the bundled HolyAgent and feature packs. It issues only `get_state` and
+`get_commands` and checks the loaded commands/tools. It never sends a prompt or reads an operator's
+real settings or credentials. Failure to isolate or a missing expected feature fails the gate.

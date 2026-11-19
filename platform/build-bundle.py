@@ -78,6 +78,8 @@ def main():
     parser.add_argument("--agent-tools", type=Path, help="prepared agent-host directory")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if bool(args.agent_tools) != bool(args.holyagent):
+        parser.error("full agent profile requires both --agent-tools and --holyagent; omit both for core-only")
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         parser.error("--commit requires a full Git commit SHA")
     if git("rev-parse", f"{args.commit}^{{commit}}").decode().strip() != args.commit:

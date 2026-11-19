@@ -14,6 +14,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from unattended_vm import bundle_input, run_install
+
 VERSION = "4.5.0"
 ISO_NAME = f"omarchy-{VERSION}-x86.iso"
 ISO_SHA256 = "5d6288bc57f96f6231719830457582c846a2291985201c36a9a7d1216978b00f"
@@ -212,6 +214,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("iso", "signature", "public-key", "ovmf-code", "ovmf-vars"):
         parser.add_argument(f"--{flag}", type=Path, required=True)
+    parser.add_argument("--bundle", type=Path, help="trusted t1os overlay tar for fully unattended provisioning")
+    parser.add_argument("--bundle-sha256", help="independent trusted overlay SHA-256")
+    parser.add_argument("--phase-timeout", type=int, default=1800, choices=range(15, 7201),
+                        metavar="15..7200", help="maximum seconds per unattended phase (default 1800)")
     parser.add_argument("--overlay-iso", type=Path, help="optional trusted read-only second-boot media")
     parser.add_argument("--size-gib", type=int, default=40, choices=range(32, 129), metavar="32..128")
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm")
@@ -223,11 +229,19 @@ def main():
     args = parser.parse_args()
     if args.apply != (args.confirm == TOKEN) or (args.confirm and not args.apply):
         parser.error(f"execution requires both --apply and --confirm {TOKEN}")
+    if bool(args.bundle) != bool(args.bundle_sha256) or (args.bundle_sha256 and not
+            re.fullmatch(r"[0-9a-f]{64}", args.bundle_sha256)):
+        parser.error("--bundle and its trusted full lowercase --bundle-sha256 are required together")
+    if args.bundle and (args.overlay_iso or args.probe_output):
+        parser.error("--bundle is incompatible with manual --overlay-iso or --probe-output")
     size = args.size_gib * GIB
     if not args.apply:
         print(json.dumps({"mode": "dry-run", "iso": ISO_NAME, "sha256": ISO_SHA256,
                           "guest_disk": DISK, "host_disk": "new temporary qcow2",
-                          "network": "none", "omarchy_configuration": config(size)}, indent=2))
+                          "network": "none",
+                          "flow": "stock unattended install, offline pinned overlay, two verified boots"
+                          if args.bundle else "stock installer only",
+                          "bundle_sha256": args.bundle_sha256, "omarchy_configuration": config(size)}, indent=2))
         return
     iso, signature, key, code, variables = map(
         regular_file, (args.iso, args.signature, args.public_key, args.ovmf_code, args.ovmf_vars),
@@ -240,15 +254,23 @@ def main():
         parser.error("TMPDIR cannot contain commas or newlines")
     if len(os.fsencode(temporary_root)) > 65:
         parser.error("set a shorter TMPDIR for the Unix display sockets")
+    if args.bundle and not shutil.which("guestfish"):
+        parser.error("--bundle requires installed guestfish and its isolated libguestfs appliance")
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix="t1os-smoke-", dir=temporary_root) as temporary:
         state = Path(temporary)
+        frozen = bundle_input(args.bundle, args.bundle_sha256, state) if args.bundle else None
         verify_iso(iso, signature, key, state)
         assigned_vars = state / "ovmf-vars.fd"
         shutil.copyfile(variables, assigned_vars)
         disk = state / "disposable.qcow2"
         run("qemu-img", "create", "-f", "qcow2", str(disk), str(size))
         seed = cidata(state, size)
+        if frozen:
+            run_install(arguments=arguments, disk=disk, state=state, code=code, variables=assigned_vars,
+                        iso=iso, seed=seed, bundle=frozen, digest=args.bundle_sha256, version=VERSION,
+                        accel=args.accel, timeout=args.phase_timeout)
+            return
         if args.probe_output:
             print("Running a socket-free QEMU installer boot probe.", flush=True)
             boot_probe(arguments(code, assigned_vars, disk, state, iso=iso, seed=seed,
@@ -267,5 +289,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise SystemExit(f"t1os VM: {error}") from error
