@@ -8,7 +8,7 @@ ConditionPathExists=!/run/archiso
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 -I /opt/t1os/bootstrap/t1os-bootstrap.py
+ExecStart=/opt/t1os/bootstrap/t1os-guest-platform bootstrap
 Environment=PATH=/usr/bin:/bin
 UMask=0022
 TimeoutStartSec=20min

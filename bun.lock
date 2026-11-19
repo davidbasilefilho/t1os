@@ -26,6 +26,9 @@
         "billion-context": "0.1.213",
         "pi-provider-kimi-code": "0.6.13",
       },
+      "devDependencies": {
+        "playwright-core": "1.65.0",
+      },
       "optionalDependencies": {
         "@oven/bun-linux-x64": "1.4.4",
         "node-linux-x64": "24.22.3",
@@ -36,6 +39,13 @@
       "version": "0.1.0",
       "dependencies": {
         "@t1os/core": "workspace:*",
+        "effect": "4.1.4",
+      },
+    },
+    "apps/platform": {
+      "name": "@t1os/platform",
+      "version": "0.1.0",
+      "dependencies": {
         "effect": "4.1.4",
       },
     },
@@ -370,6 +380,8 @@
 
     "@t1os/core": ["@t1os/core@workspace:packages/core"],
 
+    "@t1os/platform": ["@t1os/platform@workspace:apps/platform"],
+
     "@tintinweb/pi-subagents": ["@tintinweb/pi-subagents@0.23.2", "", { "dependencies": { "croner": "^10.0.1", "nanoid": "^5.1.16" }, "peerDependencies": { "@earendil-works/pi-ai": ">=1.1.0", "@earendil-works/pi-coding-agent": ">=1.1.0", "@earendil-works/pi-tui": ">=1.1.0", "typebox": "*" } }, "sha512-pcSEWfCpUK081ZFoSR456xzIgBl/xpxndOAtXDA4mTagsmVFdkyCSCPPXSBzeVcQkFKj86+TKn1K2iMr+WKvng=="],
 
     "@tokenizer/inflate": ["@tokenizer/inflate@0.4.1", "", { "dependencies": { "debug": "^4.4.3", "token-types": "^6.1.1" } }, "sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA=="],
@@ -691,6 +703,8 @@
     "path-exists": ["path-exists@4.0.0", "", {}, "sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w=="],
 
     "path-key": ["path-key@3.1.1", "", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
+
+    "playwright-core": ["playwright-core@1.65.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA=="],
 
     "pi-provider-kimi-code": ["pi-provider-kimi-code@0.6.13", "", { "dependencies": { "proper-lockfile": "^4.1.2" }, "peerDependencies": { "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*" } }, "sha512-BkLxIttaRENdDqZF4f0NWlR3Y0Xsquu9++qoQ782T1YppM1Bv4WRxddTC1bfMbWSzN148G47mftYp9pnwPmIVA=="],
 

@@ -20,3 +20,7 @@ The CLI in `apps/cli` imports the shared Effect-based state and operations in `p
 Oxfmt formats comments, sorts imports and package manifests, and applies the project's layout.
 Oxlint uses the [tsrs backend](https://oxc.rs/blog/2026-11-17-faster-type-aware-linting-with-tsrs) for
 type-aware rules; the standalone `check` script also runs tsrs. There is no tsgolint fallback.
+
+Run `bun apps/platform/src/bench-stage.ts` on Linux to compare fresh staging and same-digest
+reapply. Use the same `TMPDIR` filesystem across runs. It measures only staging with a disposable
+64 MiB fixture, and reports process write bytes rather than physical disk traffic.

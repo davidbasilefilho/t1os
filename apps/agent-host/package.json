@@ -13,6 +13,9 @@
     "billion-context": "0.1.213",
     "pi-provider-kimi-code": "0.6.13"
   },
+  "devDependencies": {
+    "playwright-core": "1.65.0"
+  },
   "optionalDependencies": {
     "@oven/bun-linux-x64": "1.4.4",
     "node-linux-x64": "24.22.3"

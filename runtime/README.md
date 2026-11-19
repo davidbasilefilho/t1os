@@ -109,15 +109,16 @@ execution and resource enforcement require a guest smoke test.
 
 ## Browser fixture and local checks
 
-`runtime/tests/runtime-config.sh` checks idempotent staging, guard failures and
+`bun test apps/agent-host/test/runtime.test.ts` checks idempotent staging, guard failures and
 the effective OpenSSH restrictions when OpenSSH is available. It does not
 activate systemd services.
 
-`python3 runtime/browser/local-smoke.py WORKSPACE_ID` exercises
+`bun apps/agent-host/src/browser-smoke.ts WORKSPACE_ID --chromium /absolute/path/to/chromium` exercises
 [Playwright Chromium](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)
 screenshot, input, ARIA and reconnect using its own static loopback fixture,
 a mode-0700 persistent profile per workspace, and Chromium sandboxing. Use a
-reviewed pinned Playwright release with its matching Chromium build. The CLI
+reviewed Chromium build matching the Playwright Core version pinned in the Bun
+workspace. The fixture is a development tool and does not install a browser. The CLI
 takes no target URLs and never imports a personal browser session. Run on a
 network-disabled guest with loopback enabled; the page route is not a network
 sandbox. The host cloud sandbox blocks Chromium's required socket operation,
