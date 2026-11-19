@@ -224,10 +224,22 @@ def checkpoint_probe(release, initial):
         raise ValueError("checkpoint could not be reopened by the operator")
 
 
+def serial(message):
+    """Write a small fixed-format message only to an existing serial character device."""
+    fd = os.open("/dev/ttyS0", os.O_NOFOLLOW | os.O_NOCTTY | os.O_WRONLY)
+    try:
+        if not stat.S_ISCHR(os.fstat(fd).st_mode):
+            raise OSError("expected a serial character device")
+        payload = (message + "\n").encode("ascii")
+        if os.write(fd, payload) != len(payload):
+            raise OSError("incomplete serial evidence")
+    finally:
+        os.close(fd)
+
+
 def phase(label):
     """Emit a fixed, non-sensitive progress label, never a command, path or credential."""
-    with open("/dev/ttyS0", "w") as output:
-        print("T1OS_PHASE", label, file=output, flush=True)
+    serial("T1OS_PHASE " + label)
 
 
 def main():
@@ -268,10 +280,8 @@ if __name__ == "__main__":
         # Nothing else writes to this dedicated serial evidence channel on our behalf.
         if os.geteuid() == 0 and os.environ.get("INVOCATION_ID"):
             try:
-                with open("/dev/ttyS0", "w") as output:
-                    print("T1OS_FAILED", file=output, flush=True)
+                serial("T1OS_FAILED")
             except OSError:
                 pass
         raise SystemExit(f"unattended bootstrap failed: {exc}")
-    with open("/dev/ttyS0", "w") as output:
-        print("T1OS_READY", sha, file=output, flush=True)
+    serial("T1OS_READY " + sha)

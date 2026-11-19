@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -106,6 +107,14 @@ class Activation(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"QEMU"):
                 p.assert_disposable_guest()
 
+    def test_serial_evidence_refuses_a_regular_file_without_modifying_it(self):
+        regular = self.state / "ordinary-file"
+        regular.write_bytes(b"untouched")
+        with regular.open("rb+") as f, patch.object(b.os, "open", return_value=os.dup(f.fileno())):
+            with self.assertRaisesRegex(OSError, "character device"):
+                b.serial("T1OS_FAILED")
+        self.assertEqual(regular.read_bytes(), b"untouched")
+
     def test_boot_receipt_no_overwrite_and_no_repromotion(self):
         stamp = self.state / "receipt"
         b.receipt(stamp, self.a.name)
@@ -115,12 +124,14 @@ class Activation(unittest.TestCase):
         (self.state / "initial-bootstrap-sha256").write_text(self.a.name)
         def read(path):
             return self.c.name if path.name == "applied" else self.a.name
-        with patch.object(b, "STATE", self.state), patch.object(b, "assert_machine"), \
+        with patch.object(b, "STATE", self.state), patch.object(b, "assert_machine"), patch.object(b, "serial") as serial, \
              patch.object(b, "trusted"), patch.object(b, "read_sha", side_effect=read), \
              patch.object(b, "verify_current_boot") as current_boot, patch.object(b, "verify") as verify, \
              patch.object(b, "checkpoint_probe") as reopen, \
              patch.object(b, "deploy", side_effect=AssertionError()):
             self.assertEqual(b.main(), self.c.name)
+            self.assertEqual([c.args[0] for c in serial.call_args_list],
+                             ["T1OS_PHASE machine-verified", "T1OS_PHASE current-boot-verified"])
             current_boot.assert_called_once_with(self.c.name)
             verify.assert_called_once_with(self.c.name)
             reopen.assert_called_once_with(b.BASE/"releases"/self.c.name, initial=False)
