@@ -1,0 +1,10 @@
+{
+  "name": "@t1os/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@t1os/core": "workspace:*",
+    "effect": "4.1.4"
+  }
+}

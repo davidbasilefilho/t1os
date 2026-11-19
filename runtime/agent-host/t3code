@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec /opt/t1os/current/agent-host/t3-release/t3 "$@"

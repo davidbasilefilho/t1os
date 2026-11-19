@@ -1,0 +1,6 @@
+-- Hyprland 0.55+ API. This template does not establish compatibility with a guest.
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "1" })
+hl.config({ xwayland = { enabled = true, create_abstract_socket = false } })
+hl.on("hyprland.start", function()
+    hl.exec_cmd("/opt/t1os/current/runtime/desktop/run-wayvnc")
+end)

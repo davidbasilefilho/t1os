@@ -1,0 +1,7 @@
+# Example for Hyprland Hyprlang versions only; verify syntax in the target guest.
+# Do not dub this desktop supported until version, capture/input/AX, and reconnect are tested.
+monitor = ,preferred,auto,1
+xwayland {
+    enabled = true
+}
+exec-once = /opt/t1os/current/runtime/desktop/run-wayvnc

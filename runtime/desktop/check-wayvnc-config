@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+(( $# == 1 )) || exit 2
+dir=$1
+config="$dir/wayvnc"
+reject() {
+  printf '%s\n' 't1os: configure a private VeNCrypt WayVNC config before starting the desktop' >&2
+  exit 78
+}
+[[ -d $dir && ! -L $dir && -O $dir && $(stat -c '%a' "$dir") == 700 ]] || reject
+for f in "$config" "$dir/tls_key.pem"; do
+  [[ -f $f && ! -L $f && -O $f && $(stat -c '%a' "$f") == 600 ]] || reject
+done
+[[ -f $dir/tls_cert.pem && ! -L $dir/tls_cert.pem && -O $dir/tls_cert.pem ]] || reject
+# Explicit schema avoids legacy/no-auth options, duplicate overrides, or redirects in the config.
+declare -A counts=()
+while IFS= read -r line || [[ -n $line ]]; do
+  case "$line" in
+    ''|'#'*) continue ;;
+    use_relative_paths=true|enable_auth=true|private_key_file=tls_key.pem|certificate_file=tls_cert.pem) ;;
+    username=*|password=*) [[ -n ${line#*=} ]] || reject ;;
+    *) reject ;;
+  esac
+  key=${line%%=*}
+  [[ -z ${counts[$key]+seen} ]] || reject
+  counts[$key]=1
+done < "$config"
+[[ ${#counts[@]} == 6 ]] || reject

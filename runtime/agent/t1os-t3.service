@@ -1,0 +1,30 @@
+[Unit]
+Description=t1os trusted T3 Code workspace (loopback only)
+ConditionUser=t1os
+ConditionPathExists=%h/.config/t1os/enable-t3
+ConditionPathExists=/etc/t3code/policy.json
+ConditionPathExists=%h/.pi/agent/settings.json
+ConditionPathExists=%h/.t3/userdata/settings.json
+
+[Service]
+Type=simple
+UMask=0077
+Environment=T3CODE_HOME=%h/.t3
+Environment=T3CODE_HOST=127.0.0.1
+Environment=T3CODE_PORT=3773
+Environment=PATH=/opt/t1os/current/agent-host/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h
+ExecStartPre=/usr/bin/cmp -s /etc/t3code/policy.json /opt/t1os/current/runtime/agent/policy.json
+ExecStart=/opt/t1os/current/agent-host/t3-release/t3 serve --host 127.0.0.1 --port 3773
+Restart=on-failure
+RestartSec=5
+# The CLI may print a pairing secret. Pair interactively instead of capturing it in journald.
+StandardOutput=null
+StandardError=null
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=%h
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

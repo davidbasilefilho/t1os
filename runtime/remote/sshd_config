@@ -1,0 +1,25 @@
+# Invoked only by t1os-ssh-tunnel.socket; there is no ListenAddress here.
+UsePAM yes
+HostKey /etc/ssh/ssh_host_ed25519_key
+AuthorizedKeysFile /etc/t1os/authorized_keys
+StrictModes yes
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowUsers t1os
+PermitEmptyPasswords no
+PermitUserEnvironment no
+PermitUserRC no
+PermitTTY no
+AllowAgentForwarding no
+X11Forwarding no
+AllowStreamLocalForwarding no
+AllowTcpForwarding local
+PermitOpen 127.0.0.1:3773 127.0.0.1:5900
+PermitListen none
+PermitTunnel no
+GatewayPorts no
+MaxSessions 0
+LogLevel VERBOSE

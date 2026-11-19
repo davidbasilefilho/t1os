@@ -1,0 +1,9 @@
+[Unit]
+Description=t1os SSH forwarding connection
+After=tailscaled.service
+
+[Service]
+ExecStart=/usr/bin/sshd -i -e -f /etc/t1os/sshd_tunnel_config
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal

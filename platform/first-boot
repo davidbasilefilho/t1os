@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 022
+export PATH=/usr/bin:/bin
+[[ $EUID == 0 ]] || { echo 'first boot requires root' >&2; exit 2; }
+exec 9>/run/t1os-provision.lock
+flock -x 9
+state=/var/lib/t1os
+base=/opt/t1os
+release=$(readlink -e "$base/current")
+[[ ${release%/*} == "$base/releases" ]] || { echo 'invalid active release' >&2; exit 1; }
+[[ $(stat -c '%u:%a' "$release") == '0:755' ]] || { echo 'invalid release ownership' >&2; exit 1; }
+
+# The developer/admin account is not the long-running operator account.
+if ! id t1os >/dev/null 2>&1; then
+  useradd --create-home --user-group --shell /bin/bash t1os
+fi
+uid=$(id -u t1os)
+[[ $uid -ge 1000 && $(id -Gn t1os) == t1os ]] ||
+  { echo 'existing t1os account must be an unprivileged, dedicated operator' >&2; exit 1; }
+[[ $(passwd -S t1os | awk '{print $2}') == L ]] ||
+  { echo 'existing t1os operator password must remain locked' >&2; exit 1; }
+[[ $(getent passwd t1os | cut -d: -f6) == /home/t1os && ! -L /home/t1os &&
+   $(stat -c '%u' /home/t1os) == "$uid" ]] || { echo 'invalid t1os operator home' >&2; exit 1; }
+install -d -m 0700 "$state"
+"$release/runtime/install.sh" /
+systemctl daemon-reload
+# Never enable the stock broad listeners. The optional tailscale-bound socket stays dormant.
+for unit in sshd.service sshd.socket; do
+  if [[ $(systemctl show "$unit" --property=LoadState --value) == loaded ]]; then
+    systemctl disable --now "$unit"
+  fi
+done
+# Display manager may be active during a console install. This changes the next boot, not this session.
+systemctl set-default multi-user.target
+if [[ $(systemctl show sddm.service --property=LoadState --value) == loaded ]]; then
+  systemctl disable sddm.service
+fi
+managed_cli="$base/current/bin/t1os"
+public_cli=/usr/local/bin/t1os
+existing_cli=$(readlink "$public_cli" 2>/dev/null || :)
+if [[ -x $release/bin/t1os ]]; then
+  if [[ ( -e $public_cli || -L $public_cli ) && $existing_cli != "$managed_cli" ]]; then
+    echo "refusing to overwrite existing $public_cli" >&2
+    exit 1
+  fi
+  install -d -m 0755 /usr/local/bin
+  ln -sfnT "$managed_cli" "$public_cli"
+elif [[ $existing_cli == "$managed_cli" ]]; then
+  unlink "$public_cli"
+fi
+if [[ -f $release/runtime/agent/holyagent-0.3.3.tgz ]]; then
+  runuser -u t1os -- env -i HOME=/home/t1os USER=t1os LOGNAME=t1os PATH=/usr/bin:/bin \
+    "$release/runtime/agent/stage.py" "$release/runtime/agent/holyagent-0.3.3.tgz"
+fi
+tmp=$(mktemp "$state/.applied.XXXXXX")
+printf '%s\n' "${release##*/}" >"$tmp"
+mv -Tf "$tmp" "$state/applied"
+echo "t1os first boot applied: ${release##*/}"
