@@ -143,6 +143,32 @@ def receipt(path, value):
         os.close(parent)
 
 
+def confirm_boot_record(digest, boot_id, text, fields):
+    """A prior uptime's durable digest, a skipped unit, or a failed same-boot retry is not success."""
+    if (not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", boot_id)
+            or text != f"{digest} {boot_id}\n" or fields.get("LoadState") != "loaded"
+            or fields.get("Result") != "success" or fields.get("ActiveState") != "active"
+            or fields.get("SubState") != "exited" or fields.get("ExecMainStatus") != "0"
+            or fields.get("ConditionResult") != "yes" or fields.get("AssertResult") != "yes"):
+        raise ValueError("no successful first-boot unit execution for this kernel boot and digest")
+    start = fields.get("ExecMainStartTimestampMonotonic", "")
+    finish = fields.get("ExecMainExitTimestampMonotonic", "")
+    if not (start.isdecimal() and finish.isdecimal() and 0 < int(start) <= int(finish)):
+        raise ValueError("current first-boot unit did not complete")
+
+
+def verify_current_boot(digest):
+    """Require volatile, kernel-boot-ID-bound evidence and native oneshot result after ordering."""
+    proof = Path("/run/t1os-first-boot.ok")
+    trusted(proof)
+    fields = dict(line.split("=", 1) for line in command(
+        "systemctl", "show", "t1os-first-boot.service", "--property=LoadState,Result,ActiveState,SubState,ExecMainStatus,"
+        "ConditionResult,AssertResult,ExecMainStartTimestampMonotonic,ExecMainExitTimestampMonotonic"
+    ).splitlines())
+    confirm_boot_record(digest, Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                        proof.read_text(), fields)
+
+
 def checkpoint_probe(release, initial):
     """Verify one real operator-owned Git worktree and t1os checkpoint across fresh guest boots.
 
@@ -211,6 +237,7 @@ def main():
             if read_sha(done) != expected:
                 raise ValueError("initial receipt conflicts with the provisioned media")
             active = read_sha(STATE / "applied")
+            verify_current_boot(active)
             verify(active)
             checkpoint_probe(BASE / 'releases' / active, initial=False)
             return active

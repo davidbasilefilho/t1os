@@ -8,7 +8,11 @@ flock -x 9
 state=/var/lib/t1os
 base=/opt/t1os
 case $#:${1-} in
-  0:) candidate=0; release=$(readlink -e "$base/current") ;;
+  0:) candidate=0
+      # Invalidate earlier same-boot success before trying to apply the unit again.
+      [[ ! -e /run/t1os-first-boot.ok ]] || unlink /run/t1os-first-boot.ok
+      release=$(readlink -e "$base/current")
+      ;;
   1:--prepare) candidate=1; release=$(dirname "$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")") ;;
   *) echo 'usage: first-boot [--prepare]' >&2; exit 2 ;;
 esac
@@ -70,4 +74,10 @@ fi
 tmp=$(mktemp "$state/.applied.XXXXXX")
 printf '%s\n' "${release##*/}" >"$tmp"
 mv -Tf "$tmp" "$state/applied"
+read -r boot_id < /proc/sys/kernel/random/boot_id
+[[ $boot_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ||
+  { echo 'invalid Linux boot ID' >&2; exit 1; }
+proof=$(mktemp /run/.t1os-first-boot.XXXXXX)
+printf '%s %s\n' "${release##*/}" "$boot_id" >"$proof"
 echo "t1os first boot applied: ${release##*/}"
+mv -Tf "$proof" /run/t1os-first-boot.ok

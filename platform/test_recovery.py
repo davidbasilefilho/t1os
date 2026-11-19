@@ -117,11 +117,28 @@ class Activation(unittest.TestCase):
             return self.c.name if path.name == "applied" else self.a.name
         with patch.object(b, "STATE", self.state), patch.object(b, "assert_machine"), \
              patch.object(b, "trusted"), patch.object(b, "read_sha", side_effect=read), \
-             patch.object(b, "verify") as verify, patch.object(b, "checkpoint_probe") as reopen, \
+             patch.object(b, "verify_current_boot") as current_boot, patch.object(b, "verify") as verify, \
+             patch.object(b, "checkpoint_probe") as reopen, \
              patch.object(b, "deploy", side_effect=AssertionError()):
             self.assertEqual(b.main(), self.c.name)
+            current_boot.assert_called_once_with(self.c.name)
             verify.assert_called_once_with(self.c.name)
             reopen.assert_called_once_with(b.BASE/"releases"/self.c.name, initial=False)
+
+    def test_prior_boot_stale_skipped_and_failed_unit_do_not_count(self):
+        sha = "a" * 64
+        old = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        new = "00000000-1111-2222-3333-444444444444"
+        fields = {"LoadState":"loaded", "Result":"success", "ActiveState":"active", "SubState":"exited", "ExecMainStatus":"0",
+                  "ConditionResult":"yes", "AssertResult":"yes",
+                  "ExecMainStartTimestampMonotonic":"10", "ExecMainExitTimestampMonotonic":"19"}
+        b.confirm_boot_record(sha, new, f"{sha} {new}\n", fields)
+        for text, changes in [(f"{sha} {old}\n", {}), (f"{sha} {new}\n", {"Result":"exit-code"}),
+             (f"{sha} {new}\n", {"ExecMainStatus":"1"}), (f"{sha} {new}\n", {"ConditionResult":"no"}),
+             (f"{sha} {new}\n", {"ExecMainStartTimestampMonotonic":"0"}),
+             (f"{sha} {new}\n", {"ExecMainExitTimestampMonotonic":"0"})]:
+            with self.subTest(text=text,changes=changes), self.assertRaises(ValueError):
+                b.confirm_boot_record(sha, new, text, {**fields, **changes})
 
     def test_exact_bounded_reads(self):
         digest = hashlib.sha256()
