@@ -1,5 +1,6 @@
 """Drive a stock installer and stage fixed bootstrap files through an offline guestfs VM."""
 
+import fcntl
 import hashlib
 import json
 import os
@@ -212,6 +213,16 @@ def run_qmp(command, *, phase, serial, deadline, digest=None):
                     qemu.kill()
 
 
+def verify_kvm_access():
+    """Re-open the actual device after the appliance exits, without changing host permissions."""
+    try:
+        with open("/dev/kvm", "rb+", buffering=0) as device:
+            if fcntl.ioctl(device.fileno(), 0xae00, 0) != 12:  # KVM_GET_API_VERSION
+                raise ValueError("KVM API version 12 required")
+    except OSError as error:
+        raise ValueError("host runner lacks KVM device access after staging; guest boot not verified") from error
+
+
 def run_install(*, arguments, disk, state, code, variables, iso, seed, bundle, digest, version, accel, timeout):
     """Run install, isolated staging, then two verified boots from only the installed disk."""
     if not shutil.which("guestfish"):
@@ -223,6 +234,8 @@ def run_install(*, arguments, disk, state, code, variables, iso, seed, bundle, d
     print("Stock guest rebooted. Inspecting installed root through the offline guestfish appliance.", flush=True)
     stage(disk, state, bundle, digest, version, timeout, accel == "tcg")
     for number in (1, 2):
+        if accel == "kvm":
+            verify_kvm_access()
         print(f"Starting installed-system verification boot {number}/2 without installation media.", flush=True)
         boot_args = arguments(code, variables, disk, state, accel=accel, probe=True)
         run_qmp(boot_args, phase=f"installed boot {number}", serial=serial,

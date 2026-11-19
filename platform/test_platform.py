@@ -227,6 +227,15 @@ print(json.dumps({'event':'SHUTDOWN','data':{'guest':reason.startswith('guest'),
                                        "T1OS_FAILED"], phase="failed", serial=serial,
                                       deadline=time.monotonic() + 4, digest=digest)
 
+    def test_post_appliance_kvm_access_uses_real_api_or_fails_closed(self):
+        with patch("builtins.open", side_effect=PermissionError), self.assertRaisesRegex(ValueError, "not verified"):
+            unattended_vm.verify_kvm_access()
+        with tempfile.TemporaryFile() as device, patch("builtins.open", return_value=device), patch.object(
+                unattended_vm.fcntl, "ioctl", return_value=12) as ioctl:
+            fd = device.fileno()
+            unattended_vm.verify_kvm_access()
+            ioctl.assert_called_once_with(fd, 0xae00, 0)
+
     def test_offline_stager_requires_stock_root_before_fixed_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)

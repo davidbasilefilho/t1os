@@ -37,11 +37,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ -c /dev/kvm ]] || { echo "This standard runner has no KVM device"; exit 1; }
-          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-            sudo setfacl -m "u:$(id -un):rw" /dev/kvm
-          fi
-          python3 - <<'PY'
+          # udev can replace a per-user /dev/kvm ACL when the appliance stops.
+          # Use the existing device group for every hypervisor process, never UID 0.
+          [[ $(id -u) != 0 && $(stat -c %G /dev/kvm) == kvm ]]
+          sudo -u "$(id -un)" -g kvm -- /usr/bin/python3 - <<'PY'
           import fcntl, os
+          assert os.geteuid() != 0
           with open('/dev/kvm', 'rb+', buffering=0) as kvm:
               assert fcntl.ioctl(kvm, 0xae00, 0) == 12, "KVM API unavailable"
           PY
@@ -99,7 +100,7 @@ jobs:
             --cli "$TMPDIR/t1os-cli" --agent-tools "$TMPDIR/tools" --holyagent "$TMPDIR/holyagent.tgz" \
             --output "$TMPDIR/t1os.tar"
           digest=$(sha256sum "$TMPDIR/t1os.tar" | cut -d' ' -f1)
-          python3 platform/omarchy-vm.py --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
+          sudo -u "$(id -un)" -g kvm -- env TMPDIR="$TMPDIR" /usr/bin/python3 platform/omarchy-vm.py --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
             --public-key "$TMPDIR/omarchy.asc" --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --bundle "$TMPDIR/t1os.tar" \
             --bundle-sha256 "$digest" --phase-timeout 3000 --accel kvm \
