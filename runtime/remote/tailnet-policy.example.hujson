@@ -1,0 +1,18 @@
+{
+  // Merge deliberately into a reviewed policy. Additive broad rules override this intent.
+  // Replace the identities before installing in your tailnet.
+  "groups": {"group:t1oss": ["operator@example.invalid"]},
+  "tagOwners": {"tag:t1os": ["autogroup:admin"]},
+  "grants": [
+    {"src": ["group:t1oss"], "dst": ["tag:t1os"], "ip": ["tcp:22", "tcp:2222"]},
+  ],
+  "ssh": [
+    {
+      "action": "check",
+      "src": ["group:t1oss"],
+      "dst": ["tag:t1os"],
+      "users": ["t1os"],
+      "checkPeriod": "1h",
+    },
+  ],
+}

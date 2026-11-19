@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() { printf 't1os job: %s\n' "$*" >&2; exit 2; }
+(( EUID != 0 )) || fail 'must run as a non-root user'
+(( $# >= 4 )) || fail 'usage: run-job WORKSPACE IMAGE@sha256:DIGEST ro|rw COMMAND [ARG...]'
+workspace=$1
+image=$2
+access=$3
+entrypoint=$4
+shift 4
+[[ -n $entrypoint ]] || fail 'command cannot be empty'
+[[ $image =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9./_-]+@sha256:[a-f0-9]{64}$ ]] || fail 'use a fully qualified image pinned by digest'
+[[ $access == ro || $access == rw ]] || fail 'workspace access must be ro or rw'
+base=$(realpath -e -- "$HOME/worktrees") || fail 'create the designated ~/worktrees directory first'
+[[ $base == "$(realpath -e -- "$HOME")/worktrees" ]] || fail 'the worktrees root cannot be a symlink'
+workspace=$(realpath -e -- "$workspace") || fail 'workspace does not exist'
+[[ -d $workspace && -O $workspace && $workspace == "$base/"* && $workspace != *','* ]] ||
+  fail 'use a directory owned by the operator under ~/worktrees'
+sockets=$(find "$workspace" -xdev -type s -print -quit) || fail 'cannot check workspace sockets'
+[[ -z $sockets ]] || fail 'remove sockets from the workspace'
+[[ -x /usr/bin/podman ]] || fail 'install reviewed rootless Podman before running jobs'
+[[ $(/usr/bin/podman --remote=false info --format '{{.Host.Security.Rootless}} {{.Host.CgroupsVersion}}') == 'true v2' ]] ||
+  fail 'rootless Podman with cgroup v2 is required'
+mount="type=bind,source=$workspace,target=/workspace,bind-propagation=rprivate,bind-nonrecursive,noexec,nosuid,nodev"
+[[ $access == rw ]] || mount+=',ro'
+exec /usr/bin/podman --remote=false run --rm \
+  --timeout=1800 --pull=never --network=none --cap-drop=ALL --security-opt=no-new-privileges \
+  --userns=keep-id --pid=private --ipc=private --no-hosts --http-proxy=false \
+  --read-only --read-only-tmpfs=false --image-volume=ignore --systemd=false --no-healthcheck \
+  --tmpfs=/tmp:rw,nosuid,nodev,noexec,notmpcopyup,size=512m \
+  --pids-limit=256 --memory=2g --memory-swap=2g --cpus=2 \
+  --mount="$mount" --workdir=/workspace --env=HOME=/tmp \
+  --entrypoint="$entrypoint" "$image" "$@"

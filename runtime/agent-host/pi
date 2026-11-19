@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Resolve this very release, including before promotion or after rollback.
+bin=$(dirname "$(realpath -e -- "$0")")
+export PI_OFFLINE=1
+export PATH="$bin:/usr/bin:/bin"
+exec "$bin/node" "$bin/../pi-deps/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" "$@"

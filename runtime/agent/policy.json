@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "organization": "t1os",
+  "limits": {
+    "connect": false,
+    "telemetry": false,
+    "browserCookieImport": false,
+    "webhookTasks": false,
+    "providers": { "allowedDrivers": ["pi"] },
+    "updates": { "mode": "off" }
+  }
+}

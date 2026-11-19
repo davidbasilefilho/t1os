@@ -1,0 +1,21 @@
+[Unit]
+Description=Verify the unattended t1os provisioning receipt in the installed disposable guest
+After=local-fs.target t1os-first-boot.service
+Before=multi-user.target
+RequiresMountsFor=/opt/t1os/bootstrap /var/lib /home
+ConditionVirtualization=vm
+ConditionPathExists=!/run/archiso
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/t1os/bootstrap/t1os-bootstrap.py
+Environment=PATH=/usr/bin:/bin
+UMask=0022
+TimeoutStartSec=20min
+PrivateTmp=yes
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

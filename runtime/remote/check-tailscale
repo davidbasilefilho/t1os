@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+packages=$(/usr/bin/pacman -Q tailscale)
+read -r name version <<< "$packages"
+[[ $name == tailscale && -n $version && $(/usr/bin/vercmp "$version" 1.104.4) != -1 ]] || {
+  echo 't1os: install a reviewed Tailscale version at or above 1.104.4' >&2
+  exit 78
+}

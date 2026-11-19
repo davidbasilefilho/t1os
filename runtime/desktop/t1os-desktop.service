@@ -1,0 +1,22 @@
+[Unit]
+Description=t1os opt-in Hyprland desktop
+# Missing marker means the optional desktop was not approved for these versions.
+ConditionUser=t1os
+ConditionFileNotEmpty=/etc/t1os/desktop-versions
+After=graphical-session-pre.target
+StartLimitIntervalSec=120s
+StartLimitBurst=4
+
+[Service]
+Type=simple
+UMask=0077
+Environment=AQ_NO_KMS_REQUIREMENT=1
+Environment=HYPRLAND_NO_RT=1
+ExecStart=/opt/t1os/current/runtime/desktop/run-desktop
+Restart=always
+RestartPreventExitStatus=78
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=default.target

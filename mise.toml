@@ -1,0 +1,6 @@
+[tools]
+# Node hosts Oxlint's JS plugin runner. Bun runs, installs and tests the workspaces.
+node = "24.22.3"
+bun = "1.4.4"
+# Built-in mise registry entry; do not substitute a system copy.
+hk = "2.13.0"

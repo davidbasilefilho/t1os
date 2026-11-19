@@ -1,0 +1,28 @@
+{
+  "name": "t1os",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "check": "tsrs --noEmit",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "hooks:install": "mise exec -- hk install --mise",
+    "lint": "oxlint",
+    "t1os": "bun apps/cli/src/cli.ts",
+    "test": "bun test",
+    "verify": "bun run fmt:check && bun run lint && bun run check && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/node": "26.6.6",
+    "eslint-plugin-jsdoc": "65.4.10",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
+    "tsrs": "7.1.0-beta.tsrs3"
+  }
+}

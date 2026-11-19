@@ -1,0 +1,116 @@
+name: Disposable guest acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t1os-offline-guest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installed-guest:
+    # An owner/maintainer can request this relatively long test once, on a same-repository PR.
+    # The verify workflow still runs on every change. Do not execute forks or use pull_request_target.
+    if: >-
+      github.event.repository.private == false &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.changes.body &&
+      contains(github.event.pull_request.body, '<!-- run-t1os-vm -->') &&
+      !contains(github.event.changes.body.from, '<!-- run-t1os-vm -->')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check standard runner storage and KVM (never use a paid or self-hosted runner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -c /dev/kvm ]] || { echo "This standard runner has no KVM device"; exit 1; }
+          # A transient ACL may disappear when libguestfs exits. Give only this
+          # ephemeral runner UID access on every kvm-device event; never use mode 0666.
+          uid=$(id -u)
+          [[ "$uid" =~ ^[1-9][0-9]*$ ]]
+          sudo -n install -d -m 0755 /run/udev/rules.d
+          printf 'SUBSYSTEM=="misc", KERNEL=="kvm", OWNER:="%s", MODE:="0600"\n' "$uid" |
+            sudo -n tee /run/udev/rules.d/99-t1os-private-kvm.rules >/dev/null
+          sudo -n udevadm control --reload-rules
+          sudo -n udevadm trigger --action=change --subsystem-match=misc --sysname-match=kvm
+          sudo -n udevadm settle
+          [[ $(stat -c '%u:%a' /dev/kvm) == "$uid:600" ]]
+          /usr/bin/python3 - <<'PY'
+          import fcntl, os
+          assert os.geteuid() != 0
+          with open('/dev/kvm', 'rb+', buffering=0) as kvm:
+              assert fcntl.ioctl(kvm, 0xae00, 0) == 12, "KVM API unavailable"
+          PY
+          # Use only a new, owned scratch directory. Never erase stock caches or someone else's files.
+          best=""
+          for base in "$RUNNER_TEMP" /mnt; do
+            [[ -d $base ]] || continue
+            avail=$(df --output=avail -B1 "$base" | tail -1)
+            if (( avail >= 26*1024*1024*1024 )); then best=$base; break; fi
+          done
+          [[ -n $best ]] || { df -h "$RUNNER_TEMP" /mnt; echo "At least 26 GiB free required"; exit 1; }
+          if [[ -w $best ]]; then
+            scratch=$(mktemp -d "$best/t1os.XXXXXXXX")
+          else
+            scratch=$(sudo mktemp -d "$best/t1os.XXXXXXXX")
+            sudo chown "$(id -u):$(id -g)" "$scratch"
+          fi
+          chmod 0700 "$scratch"
+          echo "T1OS_SCRATCH=$scratch" >> "$GITHUB_ENV"
+
+      - name: Set up pinned Bun
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.10
+
+      - name: Prepare isolated appliance on this ephemeral runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -q update
+          sudo apt-get -qy install --no-install-recommends qemu-system-x86 qemu-utils ovmf genisoimage guestfish supermin
+          # Ubuntu kernels can be root-readable only. The guestfs appliance builder runs as runner.
+          kernel=$(readlink -e "/boot/vmlinuz-$(uname -r)")
+          if [[ ! -r $kernel ]]; then sudo setfacl -m "u:$(id -un):r" "$kernel"; fi
+          test -f /usr/share/OVMF/OVMF_CODE_4M.fd
+          test -f /usr/share/OVMF/OVMF_VARS_4M.fd
+
+      - name: Build pinned full profile and verify two installed boots
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TMPDIR="$T1OS_SCRATCH"
+          # Only signed/locked public build inputs. No tailnet credentials, paired state, secrets or networked guest.
+          base=https://iso.omarchy.org/omarchy-4.5.0-x86.iso
+          get() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 --max-time 900 "$1" -o "$2"; }
+          get "$base" "$TMPDIR/base.iso"
+          get "$base.sig" "$TMPDIR/base.sig"
+          get https://keys.openpgp.org/vks/v1/by-fingerprint/40DFB630FF42BCFFB047046CF0134EE680CAC571 "$TMPDIR/omarchy.asc"
+          get https://github.com/pingdotgg/t3code/releases/download/v0.1.10/t3-0.1.10-linux-x64.tar.gz "$TMPDIR/t3.tar.gz"
+          get https://registry.npmjs.org/holyagent/-/holyagent-0.3.3.tgz "$TMPDIR/holyagent.tgz"
+          bun install --frozen-lockfile --ignore-scripts
+          bun build --compile apps/cli/src/cli.ts --outfile "$TMPDIR/t1os-cli"
+          python3 runtime/agent-host/prepare.py --t3-archive "$TMPDIR/t3.tar.gz" --output "$TMPDIR/tools"
+          python3 platform/build-bundle.py --commit "$(git rev-parse HEAD)" \
+            --cli "$TMPDIR/t1os-cli" --agent-tools "$TMPDIR/tools" --holyagent "$TMPDIR/holyagent.tgz" \
+            --output "$TMPDIR/t1os.tar"
+          digest=$(sha256sum "$TMPDIR/t1os.tar" | cut -d' ' -f1)
+          /usr/bin/python3 platform/omarchy-vm.py --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
+            --public-key "$TMPDIR/omarchy.asc" --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
+            --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --bundle "$TMPDIR/t1os.tar" \
+            --bundle-sha256 "$digest" --phase-timeout 1250 --accel kvm \
+            --apply --confirm ERASE-NEW-DISPOSABLE-VM-DISK
+          echo "Two installed boots verified for $(git rev-parse HEAD), overlay $digest" >> "$GITHUB_STEP_SUMMARY"
