@@ -66,3 +66,20 @@ test("capture and show round trip using only isolated paths and XDG state", () =
     t3UserdataDirectory: true,
   })
 })
+
+test("Android profile help is discoverable without a guest or state changes", () => {
+  expect(invoke("--help").output).toContain("android --help")
+  expect(invoke("android", "--help")).toMatchObject({
+    status: 0,
+    output: expect.stringContaining("install-sdk"),
+  })
+  expect(invoke("android", "boot")).toMatchObject({
+    status: 1,
+    error: expect.stringContaining("android --help"),
+  })
+  expect(invoke("android", "install-sdk")).toMatchObject({
+    status: 1,
+    error: expect.stringContaining("android --help"),
+  })
+  expect(existsSync(state)).toBe(false)
+})

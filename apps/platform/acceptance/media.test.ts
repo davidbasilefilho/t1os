@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, lstatSync, readdirSync, symlinkSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { stage } from "../src/overlay.ts"
+import { androidProfileFiles, stage } from "../src/overlay.ts"
 
 const bundle = process.env.T1OS_ACCEPTANCE_BUNDLE
 const pin = process.env.T1OS_ACCEPTANCE_SHA256
@@ -43,6 +43,19 @@ describe.skipIf(bundle === undefined && pin === undefined)(
         expect(file.isFile()).toBe(true)
         if (!path.endsWith("tgz")) expect(file.mode & 0o111).not.toBe(0)
       }
+      for (const path of androidProfileFiles) {
+        const file = lstatSync(join(release, path))
+        expect(file.isFile()).toBe(true)
+        expect(file.mode & 0o777).toBe(0o644)
+      }
+      expect(readdirSync(join(release, "runtime/android")).sort()).toEqual([
+        "README.md",
+        "android.conf",
+        "t1os-android.service",
+      ])
+      const help = Bun.spawnSync([join(release, "bin/t1os"), "android", "--help"])
+      expect(help.exitCode).toBe(0)
+      expect(help.stdout.toString()).toContain("install-sdk")
       const inode = lstatSync(release).ino
       expect(stage(bundle!, pin!, dir)).toBe(release)
       expect(lstatSync(release).ino).toBe(inode)

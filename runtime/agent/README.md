@@ -10,6 +10,8 @@ Use **T3 Code + Pi**. Do not substitute standalone Pi or Claude Code as the user
 
 Pass both the prepared tools tree (`--agent-tools`) and the HolyAgent archive (`--holyagent`) to the [overlay builder](../../platform/README.md). The latter is a build input, not vendored in Git. Bundle the compiled t1os CLI with `--cli`. A full profile requires all its inputs. See the [installer](../../platform/README.md) for profile selection and service lifecycle.
 
+See the [optional Android Device Hub profile](../android/README.md) for manual preview and separately authorized Pi use.
+
 ## Headless capabilities
 
 The curated profile carries the [upstream HolyAgent 0.3.3 pins](https://github.com/davidbasilefilho/holyagent/blob/holyagent-0.3.3/packages/runtime/src/config/pi-packages.json): Kimi's provider extension (no login), Pi subagents, Billion Context, todo, ask, background processes and native FFF. It does not run upstream interactive setup or postinstall scripts, sign in to a provider, or enable upstream storage cleanup. Chromium control and desktop CUA are excluded; pairing, machine trust and credentials are not build inputs.

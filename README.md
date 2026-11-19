@@ -24,6 +24,8 @@ A capture is an integrity-checked reference to a local worktree, its current Git
 3. **[Enable private access if needed](runtime/README.md).** T3 uses loopback. Tailscale SSH grants the operator shell; an independently restricted OpenSSH tunnel forwards only T3/WayVNC. Neither is enabled by default. No pairing secrets or keys are part of the build.
 4. **[Run isolated jobs and validate optional graphics](runtime/README.md#rootless-cli-jobs).** CLI jobs use rootless Podman with an explicit worktree mount, digest-pinned local image, disabled network and resource limits. The operator desktop is not an isolation boundary. Use a fresh guest for untrusted GUI workloads, without host credentials, shared mounts, display/input sockets or browser profiles.
 
+After installing the full guest, `t1os android --help` lists the [optional local Android emulator and Device Hub setup](runtime/android/README.md). The base installer does not download an SDK, accept a license, enable agent control or start an emulator.
+
 The normal boot target does not launch Hyprland. Persistent virtual Hyprland/XWayland and loopback WayVNC are opt-in candidates; no CUA version tuple is certified. Prefer the local browser fixture to desktop automation for web UI work. Recovery preserves durable files and reconnects the operator to services, **not** the memory or in-flight actions of a process that died.
 
 ## Repository map

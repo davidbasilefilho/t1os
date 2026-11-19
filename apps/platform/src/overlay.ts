@@ -30,6 +30,16 @@ const required = new Map([
   ["bin/t1os-guest-platform", true],
 ])
 
+/** Exact inventory of shipped Android controls: no SDK, licenses, device keys or test scripts. */
+export const androidProfileFiles = [
+  "apps/device-hub/src/profile.ts",
+  "apps/device-hub/src/sdk.ts",
+  "apps/device-hub/src/lock.ts",
+  "runtime/android/android.conf",
+  "runtime/android/t1os-android.service",
+  "runtime/android/README.md",
+] as const
+
 /** Allow only known overlay roots and safe regular path components. */
 export function allowed(name: string): boolean {
   if (
@@ -38,6 +48,8 @@ export function allowed(name: string): boolean {
     name.split("/").some((part) => !part || part.startsWith(".") || Buffer.byteLength(part) > 255)
   )
     return false
+  if (name.startsWith("apps/") || name.startsWith("runtime/android/"))
+    return androidProfileFiles.some((path) => path === name)
   if (name.startsWith("agent-host/pi-deps/node_modules/")) {
     // Pinned dependency assets include Unicode filenames and spaces, but never control characters.
     return !/[\\\p{C}\p{Zl}\p{Zp}]/u.test(name)
@@ -128,6 +140,11 @@ export function unpack(fd: number, destination: string): void {
         if (readExact(fd, Math.min(1_048_576, size - index), index).some((byte) => byte !== 0))
           throw new Error("nonzero bytes after overlay tar terminator")
       }
+      if (
+        androidProfileFiles.some((path) => names.has(path)) &&
+        !androidProfileFiles.every((path) => names.has(path))
+      )
+        throw new Error("incomplete Android profile")
       for (const [name, executable] of required) {
         if (!names.has(name) || (executable && !names.get(name)))
           throw new Error(`missing or nonexecutable overlay member: ${name}`)

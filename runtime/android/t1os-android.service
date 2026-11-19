@@ -1,0 +1,20 @@
+[Unit]
+Description=t1os private headless Android emulator
+ConditionUser=t1os
+ConditionPathExists=%h/.config/t1os/enable-t3
+PartOf=t1os-t3.service
+StartLimitIntervalSec=15min
+StartLimitBurst=3
+
+[Service]
+Type=exec
+UMask=0077
+WorkingDirectory=%h
+ExecStart=/opt/t1os/current/agent-host/bin/bun /opt/t1os/current/apps/device-hub/src/profile.ts boot
+ExecStartPost=/opt/t1os/current/agent-host/bin/bun /opt/t1os/current/apps/device-hub/src/profile.ts ready
+TimeoutStartSec=5min
+Restart=always
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=%h

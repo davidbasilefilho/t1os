@@ -18,7 +18,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { allowed, MAX_BYTES, MAX_ENTRIES } from "./overlay.ts"
+import { allowed, androidProfileFiles, MAX_BYTES, MAX_ENTRIES } from "./overlay.ts"
 
 const root = resolve(import.meta.dir, "../../..")
 const holyAgentDigest =
@@ -26,7 +26,12 @@ const holyAgentDigest =
   "882f137b9b8414607e4e4c8fc061ccff766de0815590a600481c56cd36590e"
 const holyAgentPath = "runtime/agent/holyagent-0.3.3.tgz"
 const guestPath = "bin/t1os-guest-platform"
-const required = ["platform/first-boot", "platform/t1os-first-boot.service", "runtime/install.sh"]
+const required = [
+  "platform/first-boot",
+  "platform/t1os-first-boot.service",
+  "runtime/install.sh",
+  ...androidProfileFiles,
+]
 const blockSize = 512
 
 function git(...args: string[]): Buffer {
