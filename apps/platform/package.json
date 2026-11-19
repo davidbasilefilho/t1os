@@ -1,0 +1,9 @@
+{
+  "name": "@t1os/platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "effect": "4.1.4"
+  }
+}

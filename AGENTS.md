@@ -1,3 +1,5 @@
 # Contributing to t1os
 
 Open ordinary work pull requests directly against the designated base branch (`main` unless the maintainer specifies another). Do not stack pull requests or target another work branch. Keep dependent changes together in one pull request; split independent changes only when each can be reviewed and merged directly into the designated base.
+
+Implement first-party installation, provisioning, runtime services, validation and benchmarks in TypeScript on Bun. Put executable applications in `apps/*`, reusable modules in `packages/*`, and use Effect for application orchestration and failure handling. Run tests with Bun. Do not introduce a Python interpreter as a prerequisite. Shell is for declarative OS integration or thin execution wrappers; systemd units, stock Omarchy tooling and unmodified third-party dependencies follow their own conventions. The installer must bootstrap from a verified, offline-capable executable, without installing a language runtime from the network.

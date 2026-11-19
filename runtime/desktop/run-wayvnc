@@ -1,21 +1,2 @@
 #!/usr/bin/env bash
-set -euo pipefail
-(( EUID != 0 ))
-[[ $(id -un) == t1os ]]
-[[ ${WAYLAND_DISPLAY-} =~ ^wayland-[0-9]+$ ]]
-socket="${XDG_RUNTIME_DIR:?}/$WAYLAND_DISPLAY"
-# The autostart callback can arrive before the compositor socket is ready.
-for (( tries=0; tries<50; tries++ )); do
-  [[ ! -S $socket ]] || break
-  sleep 0.2
-done
-[[ -S $socket ]] || { echo 't1os: Wayland socket never became ready' >&2; exit 78; }
-dir="$HOME/.config/t1os"
-runtime=$(dirname "$(realpath -e -- "$0")")
-config="$dir/wayvnc"
-# Session lifetime is owned by the desktop service; WayVNC can restart independently.
-while true; do
-  "$runtime/check-wayvnc-config" "$dir"
-  /usr/bin/wayvnc --config "$config" 127.0.0.1 5900 || true
-  sleep 5
-done
+exec /opt/t1os/current/bin/t1os-guest-platform run-wayvnc "$@"

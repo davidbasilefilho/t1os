@@ -1,14 +1,2 @@
 #!/usr/bin/env bash
-set -euo pipefail
-(( EUID != 0 ))
-[[ $(id -un) == t1os ]]
-config=/etc/t1os/hyprland.lua
-[[ -f $config ]] || config=/etc/t1os/hyprland.conf
-[[ -f $config && ! -L $config ]]
-[[ -n ${XDG_RUNTIME_DIR-} && -d $XDG_RUNTIME_DIR && -O $XDG_RUNTIME_DIR ]]
-installed=$(LC_ALL=C /usr/bin/pacman -Q hyprland xorg-xwayland wayvnc)
-if ! cmp -s /etc/t1os/desktop-versions <<< "$installed"; then
-  printf 't1os: desktop versions differ from the validated set\n' >&2
-  exit 78
-fi
-exec /usr/bin/Hyprland --config "$config"
+exec /opt/t1os/current/bin/t1os-guest-platform run-desktop "$@"

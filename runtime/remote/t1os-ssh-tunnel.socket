@@ -6,7 +6,7 @@ ConditionFileNotEmpty=/etc/t1os/authorized_keys
 ConditionFileNotEmpty=/etc/ssh/ssh_host_ed25519_key
 
 [Socket]
-ExecStartPre=/usr/bin/bash /opt/t1os/current/runtime/remote/check-tailscale
+ExecStartPre=/opt/t1os/current/bin/t1os-guest-platform check-tailscale
 ListenStream=0.0.0.0:2222
 BindToDevice=tailscale0
 Accept=yes

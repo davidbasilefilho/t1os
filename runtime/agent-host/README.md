@@ -2,7 +2,7 @@
 
 Prepare on Linux x86_64 as a normal user. The operator supplies the official
 [T3 Code 0.1.10 Linux x64 archive][release]. Its SHA-256 matches the upstream GitHub release API
-digest and the release's `SHA256SUMS`; `prepare.py` checks the pinned size and SHA-256 before
+digest and the release's `SHA256SUMS`; `prepare.ts` checks the pinned size and SHA-256 before
 extracting. Do not substitute the npm `t3` launcher: it is not the native release and can fetch on
 first invocation.
 
@@ -11,10 +11,10 @@ first invocation.
 From the reviewed t1os checkout used to build the overlay:
 
 ```sh
-mise exec -- python3 runtime/agent-host/prepare.py \
+mise exec -- bun apps/agent-host/src/cli.ts prepare \
   --t3-archive /path/to/t3-0.1.10-linux-x64.tar.gz \
   --output /path/to/artifacts/agent-tools
-python3 runtime/agent-host/smoke.py --tools /path/to/artifacts/agent-tools
+bun apps/agent-host/src/smoke.ts --tools /path/to/artifacts/agent-tools
 ```
 
 The first command installs only the `@t1os/agent-host` workspace's production npm dependencies
@@ -35,7 +35,7 @@ are checked at build time. The Pi wrapper disables automatic network fetches (Pi
 this is not a firewall or an authorization to use a model. The production dependency graph
 includes native Linux FFF plus the [pinned headless feature set](../agent/README.md).
 
-To validate an extracted candidate, run `runtime/agent-host/check-ready /absolute/release`
+To validate an extracted candidate, run `bin/t1os-guest-platform check-ready /absolute/release`
 as the non-root operator. It builds a disposable clean HOME using the same registration routine as
 the installed profile, with links to that candidate (not the active release). In a private network
 namespace it checks exact versions, exercises a native FFF search on one synthetic file, and starts

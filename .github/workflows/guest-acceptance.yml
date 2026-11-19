@@ -32,6 +32,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Set up pinned Bun
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
+        with:
+          version: 2026.11.10
+
+      - name: Install pinned workspace dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
       - name: Check standard runner storage and KVM (never use a paid or self-hosted runner)
         shell: bash
         run: |
@@ -48,12 +56,7 @@ jobs:
           sudo -n udevadm trigger --action=change --subsystem-match=misc --sysname-match=kvm
           sudo -n udevadm settle
           [[ $(stat -c '%u:%a' /dev/kvm) == "$uid:600" ]]
-          /usr/bin/python3 - <<'PY'
-          import fcntl, os
-          assert os.geteuid() != 0
-          with open('/dev/kvm', 'rb+', buffering=0) as kvm:
-              assert fcntl.ioctl(kvm, 0xae00, 0) == 12, "KVM API unavailable"
-          PY
+          bun apps/platform/src/omarchy-vm.ts --check-kvm
           # Use only a new, owned scratch directory. Never erase stock caches or someone else's files.
           best=""
           for base in "$RUNNER_TEMP" /mnt; do
@@ -70,11 +73,6 @@ jobs:
           fi
           chmod 0700 "$scratch"
           echo "T1OS_SCRATCH=$scratch" >> "$GITHUB_ENV"
-
-      - name: Set up pinned Bun
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
-        with:
-          version: 2026.11.10
 
       - name: Prepare isolated appliance on this ephemeral runner only
         shell: bash
@@ -101,14 +99,14 @@ jobs:
           get https://keys.openpgp.org/vks/v1/by-fingerprint/40DFB630FF42BCFFB047046CF0134EE680CAC571 "$TMPDIR/omarchy.asc"
           get https://github.com/pingdotgg/t3code/releases/download/v0.1.10/t3-0.1.10-linux-x64.tar.gz "$TMPDIR/t3.tar.gz"
           get https://registry.npmjs.org/holyagent/-/holyagent-0.3.3.tgz "$TMPDIR/holyagent.tgz"
-          bun install --frozen-lockfile --ignore-scripts
-          bun build --compile apps/cli/src/cli.ts --outfile "$TMPDIR/t1os-cli"
-          python3 runtime/agent-host/prepare.py --t3-archive "$TMPDIR/t3.tar.gz" --output "$TMPDIR/tools"
-          python3 platform/build-bundle.py --commit "$(git rev-parse HEAD)" \
+          bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig apps/cli/src/cli.ts --outfile "$TMPDIR/t1os-cli"
+          bun apps/agent-host/src/cli.ts prepare --t3-archive "$TMPDIR/t3.tar.gz" --output "$TMPDIR/tools"
+          bun apps/platform/src/build-bundle.ts --commit "$(git rev-parse HEAD)" \
             --cli "$TMPDIR/t1os-cli" --agent-tools "$TMPDIR/tools" --holyagent "$TMPDIR/holyagent.tgz" \
             --output "$TMPDIR/t1os.tar"
           digest=$(sha256sum "$TMPDIR/t1os.tar" | cut -d' ' -f1)
-          /usr/bin/python3 platform/omarchy-vm.py --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
+          T1OS_ACCEPTANCE_BUNDLE="$TMPDIR/t1os.tar" T1OS_ACCEPTANCE_SHA256="$digest" bun test apps/platform/acceptance/media.test.ts
+          bun apps/platform/src/omarchy-vm.ts --iso "$TMPDIR/base.iso" --signature "$TMPDIR/base.sig" \
             --public-key "$TMPDIR/omarchy.asc" --ovmf-code /usr/share/OVMF/OVMF_CODE_4M.fd \
             --ovmf-vars /usr/share/OVMF/OVMF_VARS_4M.fd --bundle "$TMPDIR/t1os.tar" \
             --bundle-sha256 "$digest" --phase-timeout 1250 --accel kvm \
